@@ -1,6 +1,7 @@
 """Integration test for app/scheduling/router.py - the HTTP surface wired
 onto Agrani's scheduling engine (app/scheduling/{pipeline,assignment,...}.py)
-via the in-memory SchedulingStore (app/scheduling/store.py).
+via the real, DB-backed SchedulingService (app/scheduling/service.py, Phase 2
+- Documentation/IMPLEMENTATION_PLAN.md).
 
 Uses FastAPI's TestClient with get_current_user / get_db overridden, so it
 exercises real RBAC + real HTTP request/response shapes without needing a
@@ -19,7 +20,6 @@ import sqlalchemy as sa
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
-import app.scheduling.store as store_module
 from app.auth.dependencies import get_current_user
 from app.db import models as db_models  # noqa: F401 - import registers tables on Base.metadata
 from app.db.session import Base, get_db
@@ -80,10 +80,12 @@ def as_(user: FakeUser):
 
 @pytest.fixture(autouse=True)
 def fresh_store():
-    """Each test gets its own in-memory scheduling store - state must not
-    leak between tests any more than it should leak between real requests
-    for different interviews."""
-    store_module._store = None
+    """Each test gets a clean DB - state must not leak between tests any
+    more than it should leak between real requests for different interviews.
+    Drop + recreate every table rather than deleting rows, so a schema
+    change here can't quietly leave an old table around."""
+    Base.metadata.drop_all(_test_engine)
+    Base.metadata.create_all(_test_engine)
     yield
     _current_user["user"] = None
 
@@ -218,3 +220,7 @@ def test_insufficient_pool_escalates_instead_of_hanging():
     assert detail["request"]["status"] == "manual_scheduling_required"
     assert detail["feasibility"]["no_match_reason"]
     assert detail["feasibility"]["feasible_slots"] == []
+    # Candidate-facing copy is a separate, generic field over the API too -
+    # never the same string as the recruiter's specific no_match_reason.
+    assert detail["feasibility"]["candidate_message"]
+    assert detail["feasibility"]["candidate_message"] != detail["feasibility"]["no_match_reason"]

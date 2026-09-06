@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import Spinner from "../components/Spinner";
 import StatusPill from "../components/StatusPill";
+import ActivityCalendar from "../components/ActivityCalendar";
 import { IconAlert, IconCheck } from "../components/icons";
 import styles from "./Candidate.module.css";
 
@@ -156,7 +157,8 @@ export default function Candidate() {
       {request.status === "awaiting_candidate_selection" && feasibility && (
         <div className={`glass-card ${styles.card}`}>
           <p className="text-secondary" style={{ marginBottom: "1rem" }}>
-            Pick a time — these are the slots where enough interviewers are free.
+            Pick whichever time works best for you — everyone on the panel is available at each
+            option below.
           </p>
           <div className={styles.slotList}>
             {feasibility.feasible_slots.map((s) => (
@@ -174,7 +176,8 @@ export default function Candidate() {
           <IconAlert width={28} height={28} style={{ margin: "0 auto 0.75rem", color: "var(--danger)" }} />
           <p style={{ fontWeight: 700, marginBottom: "0.5rem" }}>We need a hand with this one</p>
           <p className="text-secondary">
-            {feasibility?.no_match_reason || "A recruiter has been notified and will follow up directly."}
+            {feasibility?.candidate_message ||
+              "We couldn't find a time that works for everyone yet. A recruiter has been notified and will follow up with you directly."}
           </p>
         </div>
       )}
@@ -187,16 +190,34 @@ export default function Candidate() {
             <Spinner size={28} />
           )}
           <h2 className="heading-display" style={{ fontSize: "1.3rem", marginTop: "0.5rem" }}>
-            {request.status === "panel_complete" ? "You're booked" : "Lining up your panel…"}
+            {request.status === "panel_complete" ? "You're booked" : "Confirming your interviewers…"}
           </h2>
           <p className="text-secondary" style={{ marginTop: "0.5rem" }}>
             {new Date(interview.slot_start).toLocaleString()}
             <br />
-            {interview.seats.filter((s) => s.status === "accepted").length} of {interview.seats.length} interviewers confirmed
+            {request.status === "panel_complete"
+              ? "Your panel is fully confirmed."
+              : `Waiting on ${interview.seats.length - interview.seats.filter((s) => s.status === "accepted").length} of ${interview.seats.length} interviewers to confirm.`}
           </p>
           <button className="btn btn-outline" style={{ marginTop: "1.5rem" }} onClick={cancel} disabled={busy}>
             Cancel interview
           </button>
+        </div>
+      )}
+
+      {interview && request.status === "panel_complete" && (
+        <div style={{ marginTop: "1.5rem" }}>
+          <ActivityCalendar
+            events={[
+              {
+                id: interview.interview_id,
+                title: request.interview_type.replaceAll("_", " "),
+                subtitle: "Your interview",
+                start: new Date(interview.slot_start),
+                status: <StatusPill status={interview.status} />,
+              },
+            ]}
+          />
         </div>
       )}
 

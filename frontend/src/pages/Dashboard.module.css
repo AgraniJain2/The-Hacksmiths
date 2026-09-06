@@ -95,53 +95,32 @@
   color: inherit;
 }
 
-.roadmapCard {
-  padding: var(--space-5);
-  grid-column: 1 / -1;
-}
-
-.roadmapTitle {
-  font-family: var(--font-display);
-  font-size: var(--text-md);
-  font-weight: 700;
-  margin-bottom: var(--space-1);
-}
-
-.roadmapSubtitle {
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  margin-bottom: var(--space-4);
-}
-
-.roadmapList {
+.statsRow {
   display: grid;
-  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
 }
 
-.roadmapItem {
+.statTile {
+  padding: var(--space-4) var(--space-5);
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--surface-border);
+  flex-direction: column;
+  gap: 2px;
 }
 
-.roadmapItemDone {
-  background: var(--success-bg);
-  border-color: transparent;
+.statValue {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--text-primary);
 }
 
-.roadmapStep {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  width: 1.6rem;
-  flex-shrink: 0;
-}
-
-.roadmapLabel {
-  flex: 1;
+.statLabel {
   font-size: var(--text-sm);
-  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.calendarSpan {
+  grid-column: 1 / -1;
 }

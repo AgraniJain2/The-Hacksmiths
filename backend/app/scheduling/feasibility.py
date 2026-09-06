@@ -51,6 +51,16 @@ from .timeutils import (
     iter_slot_starts,
 )
 
+# Shown directly to the candidate whenever no slot clears the bar. Deliberately
+# generic - unlike `no_match_reason` (recruiter-facing, names the specific
+# blocker: pool size, skills, working hours, etc.), the candidate gets no
+# internal scheduling detail, just what happens next. See
+# Documentation/IMPLEMENTATION_PLAN.md Phase 0.6.
+CANDIDATE_NO_MATCH_MESSAGE = (
+    "We couldn't find a time that works for everyone yet. A recruiter has "
+    "been notified and will follow up with you directly."
+)
+
 
 def _slot_id(start: datetime, end: datetime) -> str:
     return f"{int(ensure_utc(start).timestamp())}-{int(ensure_utc(end).timestamp())}"
@@ -167,6 +177,7 @@ def run_feasibility(
             panelists_required=request.panelists_required,
             feasible_slots=[],
             no_match_reason=reason,
+            candidate_message=CANDIDATE_NO_MATCH_MESSAGE,
             generated_at=generated_at,
         )
 

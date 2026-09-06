@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { INTERVIEW_TYPES, SENIORITY_LEVELS } from "../lib/constants";
+import { INTERVIEWER_QUALIFICATION_TYPES, SENIORITY_LEVELS, SKILLS } from "../lib/constants";
 import Spinner from "../components/Spinner";
 import styles from "./InterviewerProfile.module.css";
 
 const empty = {
-  skills: "",
+  skills: [],
   seniority: "MID",
   interview_types: [],
   timezone: "",
@@ -27,7 +27,7 @@ export default function InterviewerProfile() {
       .then((p) => {
         if (p) {
           setForm({
-            skills: p.skills.join(", "),
+            skills: p.skills,
             seniority: p.seniority,
             interview_types: p.interview_types,
             timezone: p.timezone,
@@ -61,16 +61,23 @@ export default function InterviewerProfile() {
     setSaved(false);
   }
 
+  function toggleSkill(s) {
+    setForm((f) => ({
+      ...f,
+      skills: f.skills.includes(s) ? f.skills.filter((x) => x !== s) : [...f.skills, s],
+    }));
+    setSaved(false);
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
       if (form.interview_types.length === 0) throw new Error("Pick at least one interview type.");
-      const skills = form.skills.split(",").map((s) => s.trim()).filter(Boolean);
-      if (skills.length === 0) throw new Error("Add at least one skill.");
+      if (form.skills.length === 0) throw new Error("Pick at least one skill.");
       await api.saveMyInterviewerProfile({
-        skills,
+        skills: form.skills,
         seniority: form.seniority,
         interview_types: form.interview_types,
         timezone: form.timezone,
@@ -101,17 +108,16 @@ export default function InterviewerProfile() {
       <form className={`glass-card ${styles.card}`} onSubmit={handleSubmit}>
         <div className="form-grid">
           <div className="field field-span-2">
-            <label className="field-label" htmlFor="skills">
-              Skills
-            </label>
-            <input
-              id="skills"
-              className="input"
-              placeholder="python, system-design"
-              value={form.skills}
-              onChange={(e) => set("skills", e.target.value)}
-            />
-            <span className="field-hint">Comma-separated.</span>
+            <label className="field-label">Skills</label>
+            <div className={styles.typesGrid}>
+              {Array.from(new Set([...SKILLS, ...form.skills])).map((s) => (
+                <label key={s} className={styles.typeChip}>
+                  <input type="checkbox" checked={form.skills.includes(s)} onChange={() => toggleSkill(s)} />
+                  {s}
+                </label>
+              ))}
+            </div>
+            <span className="field-hint">Pick every skill you can interview for.</span>
           </div>
 
           <div className="field">
@@ -150,13 +156,17 @@ export default function InterviewerProfile() {
           <div className="field field-span-2">
             <label className="field-label">Qualified interview types</label>
             <div className={styles.typesGrid}>
-              {INTERVIEW_TYPES.map((t) => (
+              {INTERVIEWER_QUALIFICATION_TYPES.map((t) => (
                 <label key={t} className={styles.typeChip}>
                   <input type="checkbox" checked={form.interview_types.includes(t)} onChange={() => toggleType(t)} />
                   {t.replaceAll("_", " ")}
                 </label>
               ))}
             </div>
+            <span className="field-hint">
+              Which round (1, 2, ...) a technical interview is doesn't change what you're
+              qualified for — the recruiter picks that when they create the request.
+            </span>
           </div>
 
           <div className="field field-span-2">

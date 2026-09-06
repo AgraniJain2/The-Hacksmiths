@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
 
+    # Email (app/notifications/service.py) — Resend. Blank RESEND_API_KEY
+    # degrades to "log and skip" rather than failing, so a missing/misconfigured
+    # key never breaks the request that triggered the notification.
+    RESEND_API_KEY: str = ""
+    # Default is Resend's own shared test sender, which works with no domain
+    # verification but only delivers to the Resend account's own owner email
+    # (see resend.com/docs/dashboard/domains/introduction). Verify a real
+    # domain and point this at it before relying on this for real recipients.
+    RESEND_FROM_EMAIL: str = "WorkHire <onboarding@resend.dev>"
+
     # App
     FRONTEND_URL: str = "http://localhost:5173"
     SESSION_COOKIE_NAME: str = "session"

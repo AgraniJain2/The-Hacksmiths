@@ -18,6 +18,15 @@ from pydantic import BaseModel
 from .config import SENIORITY_ORDER, PoolPolicy, SeniorityMode, SkillMatchMode
 from .models import Interviewer, InterviewRequest
 
+# Request-side interview types that are "just a round number" rather than a
+# distinct qualification - an interviewer who declares the generic "TECHNICAL"
+# capability (see Documentation/IMPLEMENTATION_PLAN.md Phase 0.2) is eligible
+# for either round without picking Round 1 vs Round 2 specifically. This is
+# purely additive: an interviewer who still declares the exact granular type
+# (e.g. only "TECHNICAL_ROUND_1") keeps matching only that round, unchanged.
+TECHNICAL_ROUND_TYPES = {"TECHNICAL_ROUND_1", "TECHNICAL_ROUND_2"}
+GENERIC_TECHNICAL_TYPE = "TECHNICAL"
+
 
 class PoolResolutionResult(BaseModel):
     """Engine-internal (not part of the wire contract)."""
@@ -43,6 +52,12 @@ def _skill_ok(required: Sequence[str], interviewer_skills: Sequence[str], policy
     if mode == SkillMatchMode.RATIO:
         return (len(overlap) / len(required_set)) >= policy.skill_match_ratio
     raise ValueError(f"unhandled skill_match_mode: {mode!r}")
+
+
+def _type_ok(requested: str, interviewer_types: Sequence[str]) -> bool:
+    if requested in interviewer_types:
+        return True
+    return requested in TECHNICAL_ROUND_TYPES and GENERIC_TECHNICAL_TYPE in interviewer_types
 
 
 def _seniority_ok(requested: str, interviewer: str, policy: PoolPolicy) -> bool:
@@ -77,7 +92,7 @@ def resolve_interviewer_pool(
     for interviewer in all_interviewers:
         if policy.require_active and not interviewer.active:
             continue
-        if request.interview_type not in interviewer.interview_types:
+        if not _type_ok(request.interview_type, interviewer.interview_types):
             continue
         if not _skill_ok(request.required_skills, interviewer.skills, policy):
             continue

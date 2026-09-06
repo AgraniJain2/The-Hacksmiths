@@ -82,8 +82,8 @@ export default function RequestNew() {
             Request created
           </h1>
           <p className="text-secondary" style={{ marginTop: "0.5rem" }}>
-            There's no automatic email yet (the Notification Service isn't built) — share this
-            invite link with {form.candidate_name || "the candidate"} yourself.
+            We've emailed {form.candidate_name || "the candidate"} the invite link. You can also
+            share it directly — handy if their inbox is slow, or email delivery hiccups.
           </p>
           <div className={styles.linkRow}>
             <input className="input" readOnly value={result.invite_link} onFocus={(e) => e.target.select()} />

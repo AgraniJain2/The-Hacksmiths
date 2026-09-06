@@ -1,12 +1,20 @@
 # Smart Interview Scheduler — core scheduling engine
 
 Location: `backend/app/scheduling/`. Pure Python + Pydantic, FastAPI-ready
-(every model in `scheduling.models` is a `BaseModel`). No module calls a real
-URL — all external dependencies go through the ABCs in
-`scheduling.providers.interfaces`, backed for now by in-memory mocks. Real
-adapters (Calendar API, the SQLAlchemy-backed repositories from
-[DATA_MODEL.md](DATA_MODEL.md)) and the FastAPI router that wires them in are
-the next piece of work, not yet built — see [MODULE_GUIDE.md](MODULE_GUIDE.md).
+(every model in `scheduling.models` is a `BaseModel`). No module in *this*
+package calls a real URL or a DB row — all external dependencies go through
+the ABCs in `scheduling.providers.interfaces`. The pure engine itself
+(everything in the file list below) is untouched by what's backing those
+ABCs.
+
+**Provider wiring status** (Documentation/IMPLEMENTATION_PLAN.md): real,
+SQLAlchemy-backed providers (`providers/db_*.py`) and `service.py` (the
+`SchedulingService` `router.py` actually calls) replaced the old in-memory
+store in Phase 2 — state now survives a restart. `mock_*.py` + `fixtures.py`
+haven't gone anywhere; they're what this package's own tests
+(`tests/scheduling/`) are built on, deliberately independent of whichever
+real backing exists. `CalendarProvider` is still the mock (`MockCalendarProvider`)
+in the live app too — that swap is Phase 3, not done yet.
 
 This package implements workflow **steps 4, 6, and the step-8 re-computations**
 (see [WORKFLOW.md](WORKFLOW.md)). Auth, the candidate-facing link pages,
@@ -23,11 +31,14 @@ assignment.py    PanelAssignmentAgent — deterministic N-seat fill + cascade   
 escalation.py    escalate_to_manual_scheduling(request, reason, notifier)
 state_machine.py InterviewStateMachine — creation, conflict re-check, step-8 exception paths
 pipeline.py      find_feasible_slots(...) / assign_panel(...) / run_happy_path(...)
-providers/       interfaces.py (ABCs) + mock_*.py (in-memory) + fixtures.py (6 scenarios)
+providers/       interfaces.py (ABCs) + mock_*.py (in-memory, tests only) + db_*.py (real, Phase 2) + fixtures.py (6 scenarios)
 ```
 
-Run the tests: `cd backend && pytest tests/scheduling` (54 tests, ~0.1s, no
-network).
+Run the pure-engine tests: `cd backend && pytest tests/scheduling` (57 tests,
+~0.1s, no network, no DB — the mocks above). The DB-backed providers and
+`service.py` have their own tests in `tests/scheduling_api/` (the HTTP
+integration test) and `tests/scheduling_service/` (repository/concurrency
+tests) — `cd backend && pytest` runs everything.
 
 ---
 
@@ -181,9 +192,12 @@ Step-8 exception paths on `InterviewStateMachine`:
 ## 13. Provider swap path
 
 Every engine module imports only the ABCs in `providers/interfaces.py` and the
-data-contract models. To go live: write one HTTP-backed class per ABC
-(`CalendarProvider`, `CandidateRepository`, `InterviewerRepository`,
-`AvailabilityRepository`, `InterviewerLoadProvider`, `NotificationProvider`) and
-change the single wiring point (a FastAPI `Depends()` factory). Pool resolution,
-feasibility, ranking, the reservation ledger, the assignment agent, and the state
-machine are untouched.
+data-contract models — this is what made the Phase 2 swap possible without
+touching pool resolution, feasibility, ranking, the assignment agent, or the
+state machine at all. Done: `CandidateRepository`, `InterviewerRepository`,
+`AvailabilityRepository`, `InterviewerLoadProvider`, `NotificationProvider`
+(all real, DB/Resend-backed — `db_*.py` + `app/notifications/`), plus
+`ReservationLedger`'s DB-backed replacement (`DbReservationLedger` — not an
+ABC itself, see its own docstring for why, but the same swap-at-one-point
+principle). Still mocked: `CalendarProvider` (Phase 3 —
+Documentation/IMPLEMENTATION_PLAN.md).

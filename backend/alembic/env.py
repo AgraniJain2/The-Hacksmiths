@@ -34,7 +34,13 @@ def run_migrations_online():
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        # render_as_batch: SQLite can't ALTER a column/constraint in place -
+        # batch mode recreates the table under the hood instead. Harmless on
+        # Postgres (plain ALTER still emitted there); needed here since dev
+        # runs on SQLite (see ARCHITECTURE.md's DB row).
+        context.configure(
+            connection=connection, target_metadata=target_metadata, render_as_batch=True
+        )
         with context.begin_transaction():
             context.run_migrations()
 

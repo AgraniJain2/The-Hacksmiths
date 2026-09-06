@@ -152,7 +152,8 @@ class FeasibilityResult(BaseModel):
     candidate_id: str
     panelists_required: int
     feasible_slots: List[FeasibleSlot]  # empty => nothing feasible
-    no_match_reason: Optional[str] = None  # populated when feasible_slots is empty
+    no_match_reason: Optional[str] = None  # populated when feasible_slots is empty - recruiter-facing, specific
+    candidate_message: Optional[str] = None  # populated when feasible_slots is empty - candidate-facing, generic
     generated_at: datetime
 
 

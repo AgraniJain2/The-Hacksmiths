@@ -24,6 +24,7 @@ def test_normal_single_produces_binary_feasible_slots(normal_single):
     _, result = _feasibility(normal_single)
     assert result.feasible_slots
     assert result.no_match_reason is None
+    assert result.candidate_message is None
     for slot in result.feasible_slots:
         assert slot.feasible_count >= 1
         assert slot.feasible_count == len(slot.feasible_interviewer_ids)
@@ -67,12 +68,19 @@ def test_no_feasible_slot_returns_reason_and_no_slots(no_feasible_slot):
     _, result = _feasibility(no_feasible_slot)
     assert result.feasible_slots == []
     assert "no time in the candidate's submitted availability" in result.no_match_reason
+    # Candidate-facing copy is separate from the recruiter's specific reason,
+    # and must never leak internal scheduling detail (pool size, buffers, ...).
+    assert result.candidate_message
+    assert "eligible pool" not in result.candidate_message
+    assert "buffer" not in result.candidate_message
 
 
 def test_insufficient_pool_short_circuits_feasibility(insufficient_pool):
     _, result = _feasibility(insufficient_pool)
     assert result.feasible_slots == []
     assert "insufficient interviewer pool" in result.no_match_reason
+    assert result.candidate_message
+    assert "insufficient" not in result.candidate_message.lower()
 
 
 def test_empty_availability_is_reported(normal_single):

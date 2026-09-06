@@ -3,22 +3,26 @@ import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import GoogleConnectionCard from "../components/GoogleConnectionCard";
+import ActivityCalendar from "../components/ActivityCalendar";
 import StatusPill from "../components/StatusPill";
 import { ROLE_LABELS, initials } from "../components/AppShell";
-import { IconCheck } from "../components/icons";
 import styles from "./Dashboard.module.css";
 
-const ROADMAP = [
-  { label: "Setup & Auth", done: true },
-  { label: "Create Interview Request", done: true },
-  { label: "Interviewer Pool Profile", done: true },
-  { label: "Candidate Availability Collection", done: true },
-  { label: "Interviewer Pool Feasibility Check", done: true },
-  { label: "Candidate Slot Selection", done: true },
-  { label: "N-Seat Interviewer Assignment", done: true },
-  { label: "Event Creation & Dispatch", done: false },
-  { label: "Post-Booking & Exception Handling", done: true },
-];
+const OPEN_REQUEST_STATUSES = new Set([
+  "collecting_availability",
+  "awaiting_candidate_selection",
+  "assigning_panel",
+  "manual_scheduling_required",
+]);
+
+function StatTile({ label, value }) {
+  return (
+    <div className={`glass-card ${styles.statTile}`}>
+      <span className={styles.statValue}>{value}</span>
+      <span className={styles.statLabel}>{label}</span>
+    </div>
+  );
+}
 
 function StaffQuickActions() {
   const [recent, setRecent] = useState(null);
@@ -56,16 +60,7 @@ function StaffQuickActions() {
   );
 }
 
-function InterviewerQuickActions() {
-  const [offerCount, setOfferCount] = useState(null);
-
-  useEffect(() => {
-    api
-      .myOffers()
-      .then((offers) => setOfferCount(offers.filter((o) => o.interview.seats[o.seat_index].status === "offered").length))
-      .catch(() => setOfferCount(0));
-  }, []);
-
+function InterviewerQuickActions({ offerCount }) {
   return (
     <div className={`glass-card ${styles.actionsCard}`}>
       <h3 className={styles.actionsTitle}>Your panel work</h3>
@@ -84,9 +79,82 @@ function InterviewerQuickActions() {
   );
 }
 
+/** Recruiter/hiring manager: open-request count + confirmed-interview calendar. */
+function useStaffActivity() {
+  const [state, setState] = useState({ loading: true, stats: null, events: [] });
+
+  useEffect(() => {
+    api
+      .listRequests()
+      .then((items) => {
+        const now = new Date();
+        const openCount = items.filter(({ request }) => OPEN_REQUEST_STATUSES.has(request.status)).length;
+        const upcoming = items.filter(({ interview }) => interview && new Date(interview.slot_start) >= now);
+        setState({
+          loading: false,
+          stats: [
+            { label: "Open requests", value: openCount },
+            { label: "Upcoming interviews", value: upcoming.length },
+          ],
+          events: upcoming.map(({ request, interview }) => ({
+            id: interview.interview_id,
+            title: request.interview_type.replaceAll("_", " "),
+            subtitle: request.candidate_id,
+            start: new Date(interview.slot_start),
+            status: <StatusPill status={interview.status} />,
+          })),
+        });
+      })
+      .catch(() => setState({ loading: false, stats: [], events: [] }));
+  }, []);
+
+  return state;
+}
+
+/** Interviewer: pending-offer count + a calendar of seats they've actually accepted. */
+function useInterviewerActivity() {
+  const [state, setState] = useState({ loading: true, stats: null, events: [], offerCount: null });
+
+  useEffect(() => {
+    api
+      .myOffers()
+      .then((offers) => {
+        const now = new Date();
+        const seatOf = (o) => o.interview.seats[o.seat_index];
+        const pending = offers.filter((o) => seatOf(o).status === "offered");
+        const accepted = offers.filter(
+          (o) => seatOf(o).status === "accepted" && new Date(o.interview.slot_start) >= now
+        );
+        setState({
+          loading: false,
+          offerCount: pending.length,
+          stats: [
+            { label: "Pending offers", value: pending.length },
+            { label: "Confirmed seats", value: accepted.length },
+          ],
+          events: accepted.map((o) => ({
+            id: `${o.interview.interview_id}-${o.seat_index}`,
+            title: o.interview.interview_type.replaceAll("_", " "),
+            subtitle: "Panel seat confirmed",
+            start: new Date(o.interview.slot_start),
+            status: <StatusPill status={seatOf(o).status} kind="seat" />,
+          })),
+        });
+      })
+      .catch(() => setState({ loading: false, stats: [], events: [], offerCount: 0 }));
+  }, []);
+
+  return state;
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const firstName = user?.name?.split(" ")[0];
+  const isInterviewer = user?.role === "interviewer";
+
+  const staffActivity = useStaffActivity();
+  const interviewerActivity = useInterviewerActivity();
+  const activity = isInterviewer ? interviewerActivity : staffActivity;
 
   if (user?.role === "candidate") {
     return <Navigate to="/candidate" replace />;
@@ -103,6 +171,14 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {activity.stats && activity.stats.length > 0 && (
+        <div className={styles.statsRow}>
+          {activity.stats.map((s) => (
+            <StatTile key={s.label} label={s.label} value={s.value} />
+          ))}
+        </div>
+      )}
+
       <div className={styles.grid}>
         <div className={`glass-card ${styles.profileCard}`}>
           <span className={styles.avatar}>{initials(user?.name)}</span>
@@ -114,30 +190,23 @@ export default function Dashboard() {
 
         <GoogleConnectionCard variant="summary" />
 
-        {user?.role === "interviewer" ? <InterviewerQuickActions /> : <StaffQuickActions />}
+        {isInterviewer ? (
+          <InterviewerQuickActions offerCount={interviewerActivity.offerCount} />
+        ) : (
+          <StaffQuickActions />
+        )}
 
-        <div className={`glass-card ${styles.roadmapCard}`}>
-          <h2 className={styles.roadmapTitle}>Scheduling workflow</h2>
-          <p className={styles.roadmapSubtitle}>
-            WorkHire's end-to-end flow, per <span className="font-mono">Documentation/WORKFLOW.md</span>.
-            Stages 2 through 6 and 8 run against an in-memory demo backend — no database or real Google
-            Calendar/Meet integration yet (see <span className="font-mono">Documentation/SCHEDULER.md</span>).
-          </p>
-          <div className={styles.roadmapList}>
-            {ROADMAP.map((step, i) => (
-              <div key={step.label} className={`${styles.roadmapItem} ${step.done ? styles.roadmapItemDone : ""}`}>
-                <span className={styles.roadmapStep}>{String(i + 1).padStart(2, "0")}</span>
-                <span className={styles.roadmapLabel}>{step.label}</span>
-                {step.done ? (
-                  <span className="pill pill-success">
-                    <IconCheck width={12} height={12} /> Live
-                  </span>
-                ) : (
-                  <span className="pill pill-neutral">Coming soon</span>
-                )}
-              </div>
-            ))}
-          </div>
+        <div className={styles.calendarSpan}>
+          <ActivityCalendar
+            events={activity.events}
+            emptyLabel={
+              activity.loading
+                ? "Loading…"
+                : isInterviewer
+                ? "No confirmed panel seats coming up."
+                : "No confirmed interviews coming up."
+            }
+          />
         </div>
       </div>
     </div>

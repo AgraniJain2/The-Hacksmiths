@@ -4,12 +4,17 @@ Source of truth is always `backend/app/db/models.py` — this doc explains the
 *why* behind it; if the two disagree, the code is right and this doc is stale
 (fix the doc).
 
-**Status:** `User`, `OAuthToken` are built. `Interview` and `InviteToken`
-exist as minimal stubs (see below) — everything else on this page is **spec
-for Module 2 onward, not yet in code.** Build against this spec; don't treat
-its absence from `models.py` as a discrepancy to "fix" without discussion,
-since it reflects the interviewer-pooling redesign (see
-[WORKFLOW.md](WORKFLOW.md#revision-history-interviewer-pooling-so-nobodys-confused-reading-old-context)).
+**Status:** everything on this page is built (Phase 2,
+Documentation/IMPLEMENTATION_PLAN.md) — `User`, `OAuthToken`, the extended
+`Interview`, `InterviewerProfile`, `CandidateAvailabilityWindow`,
+`InterviewSlotOffer`, `InterviewParticipant`, `InviteToken`. A handful of
+columns below differ from what's actually in `models.py`, on purpose —
+`app/db/models.py`'s `Interview` docstring lists each one and why (mostly:
+the engine needs an email/name denormalized where this doc assumed a `User`
+FK join, plus two JSON cache columns — `seats_json`, `feasibility_json` —
+for engine state that has no independent DB representation of its own).
+Don't "fix" those back to match this doc; per the header above, the code is
+right there. Everything else below matches the code as shipped.
 
 ## Tables that exist today (built)
 

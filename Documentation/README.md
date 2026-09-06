@@ -16,20 +16,24 @@ decided and built**, not the raw brief.
 
 ## Current status (update this as modules land)
 
+See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the actively-maintained,
+phase-by-phase version of this table (what's shipped, what's next, in what
+order) — this one is the coarse per-module summary.
+
 | Module | Status | Doc |
 |---|---|---|
 | Auth (Google OAuth, sessions, RBAC) | ✅ Built & working | [AUTH_MODULE.md](AUTH_MODULE.md) |
-| Interview Request creation | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-2--interview-request) |
-| Interviewer Pool Profile | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-2b--interviewer-pool-profile) |
-| Candidate Availability Collection | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-3--candidate-availability-collection) |
-| Interviewer Pool Feasibility Check | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-4--interviewer-pool-feasibility-check) |
-| Candidate Slot Selection | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-5--candidate-slot-selection) |
-| N-Seat Interviewer Assignment (load-balanced, per-seat cascade) | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-6--n-seat-interviewer-assignment) |
-| Event Creation & Dispatch (Meet link, emails, .ics) | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-7--event-creation--dispatch) |
-| Post-Booking Exception Handling (reminders, cancel/reschedule both parties) | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-8--post-booking--exception-handling) |
-| Notification Service (shared) | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#shared-notification-service) |
+| Interview Request creation | ✅ Built — real DB persistence (Phase 2) | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-2--interview-request) |
+| Interviewer Pool Profile | ✅ Built — real DB persistence (Phase 2) | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-2b--interviewer-pool-profile) |
+| Candidate Availability Collection | ✅ Built — real DB persistence (Phase 2) | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-3--candidate-availability-collection) |
+| Interviewer Pool Feasibility Check | ✅ Built — calendar check still mocked (Phase 3 makes it real) | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-4--interviewer-pool-feasibility-check) |
+| Candidate Slot Selection | ✅ Built — real DB persistence (Phase 2) | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-5--candidate-slot-selection) |
+| N-Seat Interviewer Assignment (load-balanced, per-seat cascade) | ✅ Built — real DB persistence + a real per-interviewer lock (Phase 2) | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-6--n-seat-interviewer-assignment) |
+| Event Creation & Dispatch (Meet link, emails, .ics) | 🔲 Not started (Phase 4) | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-7--event-creation--dispatch) |
+| Post-Booking Exception Handling (reminders, cancel/reschedule both parties) | 🟡 Cancel/reschedule built; reminders + offer-expiry sweep not started (Phase 5) | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-8--post-booking--exception-handling) |
+| Notification Service (shared) | ✅ Built — real email via Resend (Phase 1) | [MODULE_GUIDE.md](MODULE_GUIDE.md#shared-notification-service) |
 | Frontend — Setup & Auth pages (login, callback, dashboard shell, Google connection) | ✅ Built | [FRONTEND_DESIGN_SYSTEM.md](FRONTEND_DESIGN_SYSTEM.md) |
-| Frontend — remaining pages (one per module above) | 🔲 Not started | [FRONTEND_DESIGN_SYSTEM.md](FRONTEND_DESIGN_SYSTEM.md#adding-a-new-authenticated-page) |
+| Frontend — remaining pages (one per module above) | ✅ Built (all wired to the real DB-backed API now) | [FRONTEND_DESIGN_SYSTEM.md](FRONTEND_DESIGN_SYSTEM.md#adding-a-new-authenticated-page) |
 
 ## Doc map
 
