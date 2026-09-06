@@ -1,0 +1,22 @@
+[project]
+name = "hacksmiths"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "shamvrueth", email = "shamvrueth@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "langchain>=1.4.0",
+    "langchain-mcp-adapters>=0.3.2",
+    "langgraph>=1.2.11",
+    "mcp>=1.29.1",
+]
+
+[project.scripts]
+hacksmiths = "hacksmiths:main"
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13.0"]
+build-backend = "uv_build"
