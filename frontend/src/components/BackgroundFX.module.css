@@ -1,0 +1,60 @@
+.wrap {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.grid {
+  position: absolute;
+  inset: -1px;
+  background-image: linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 100%);
+}
+
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.55;
+  animation: float 18s var(--ease-standard) infinite alternate;
+}
+
+:root[data-theme="dark"] .blob {
+  opacity: 0.35;
+}
+
+.blobOne {
+  width: 46vw;
+  height: 46vw;
+  top: -14vw;
+  left: -10vw;
+  background: var(--accent);
+}
+
+.blobTwo {
+  width: 38vw;
+  height: 38vw;
+  bottom: -16vw;
+  right: -8vw;
+  background: var(--accent-2);
+  animation-delay: -6s;
+}
+
+@keyframes float {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(3vw, 4vw) scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .blob {
+    animation: none;
+  }
+}

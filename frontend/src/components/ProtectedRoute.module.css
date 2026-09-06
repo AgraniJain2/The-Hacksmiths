@@ -1,0 +1,17 @@
+.center {
+  display: grid;
+  place-items: center;
+  height: 100vh;
+  padding: var(--space-5);
+}
+
+.errorCard {
+  padding: var(--space-6);
+  max-width: 380px;
+  text-align: center;
+}
+
+.errorText {
+  margin-bottom: var(--space-4);
+  color: var(--text-secondary);
+}

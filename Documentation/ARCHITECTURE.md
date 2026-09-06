@@ -10,14 +10,14 @@
 | Database (prod / scale demo) | PostgreSQL | Needed the moment any feature relies on row-level locking (`SELECT ... FOR UPDATE` when creating an interviewer offer — see [WORKFLOW.md](WORKFLOW.md#6-n-seat-interviewer-assignment)) or handles concurrent writers. SQLite's locking is coarser (whole-file), which is fine for a single-dev happy-path demo but not for proving the race-condition guard actually works. |
 | Auth | Google OAuth 2.0 (Authorization Code + offline access) | We need standing access to Calendar/Gmail on the user's behalf *after* they've left the browser (background scheduling, reminders) — that requires a refresh token, which only the offline-access OAuth flow provides. See [AUTH_MODULE.md](AUTH_MODULE.md). |
 | External APIs | Google Calendar API, Gmail API | Free/busy checks, event creation with Meet conferencing, and sending notifications, all through the same Google identity a user already has. |
-| Frontend | Not yet decided/built | — |
+| Frontend | React 18 + Vite (plain JS/JSX, no TypeScript), React Router v6, CSS Modules + a shared design-token stylesheet (no Tailwind/component library) | Small, fixed page count so far didn't justify a heavier toolchain; see [FRONTEND_DESIGN_SYSTEM.md](FRONTEND_DESIGN_SYSTEM.md) for the full reasoning and the tokens/components every new page should build on. |
 
 ## System diagram
 
 ```mermaid
 flowchart LR
     subgraph Client
-        FE["Frontend (TBD)"]
+        FE["Frontend\n(React + Vite)"]
     end
 
     subgraph Backend["FastAPI backend (backend/app)"]

@@ -1,0 +1,151 @@
+/*
+ * WorkHire design tokens.
+ * Single source of truth for color/type/space/shape across every page.
+ * See Documentation/FRONTEND_DESIGN_SYSTEM.md — never hardcode a hex value
+ * or a px spacing/radius in a component; add or reuse a token here instead.
+ *
+ * Theme switching: ThemeContext sets data-theme="light" | "dark" on <html>.
+ * Light values live on :root; dark values override under [data-theme="dark"].
+ * There is no "system" tri-state at runtime — ThemeContext resolves the
+ * initial value once (stored choice > prefers-color-scheme > dark) and
+ * writes a concrete choice, so tokens only ever need these two blocks.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Typography ---- */
+  --font-display: "Space Grotesk", "Inter", system-ui, -apple-system, sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-md: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.75rem;
+
+  /* ---- Spacing scale (4px base) ---- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+
+  /* ---- Shape ---- */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-full: 999px;
+
+  /* ---- Motion ---- */
+  --ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 140ms;
+  --duration-standard: 260ms;
+  --duration-slow: 600ms;
+
+  /* ---- Brand accent (identical hue in both themes, lightness shifts) ---- */
+  --accent: #6d5efc;
+  --accent-2: #0ea5b5;
+  --accent-strong: #5a3ef5;
+  --accent-gradient: linear-gradient(135deg, #6d5efc 0%, #22a6d9 100%);
+  --accent-gradient-soft: linear-gradient(135deg, rgba(109, 94, 252, 0.14), rgba(14, 165, 181, 0.14));
+
+  /* ---- Semantic ---- */
+  --success: #15803d;
+  --success-bg: rgba(21, 128, 61, 0.12);
+  --warning: #b45309;
+  --warning-bg: rgba(180, 83, 9, 0.12);
+  --danger: #dc2626;
+  --danger-bg: rgba(220, 38, 38, 0.1);
+
+  /* ---- Surfaces & text (light) ---- */
+  --bg: #f3f4fb;
+  --bg-elevated: #ffffff;
+  --surface: rgba(255, 255, 255, 0.86);
+  --surface-solid: #ffffff;
+  --surface-border: rgba(15, 23, 42, 0.09);
+  --surface-hover: rgba(15, 23, 42, 0.035);
+  --overlay-blur: 18px;
+
+  --text-primary: #0f1222;
+  --text-secondary: #4b5166;
+  --text-muted: #8790a3;
+  --text-on-accent: #ffffff;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 20px 48px rgba(15, 23, 42, 0.12);
+  --shadow-glow: 0 0 0 rgba(0, 0, 0, 0);
+
+  --grid-line: rgba(15, 23, 42, 0.05);
+
+  /* ---- Role badge hues (same pattern, distinct hue per role) ---- */
+  --role-recruiter: #2563eb;
+  --role-recruiter-bg: rgba(37, 99, 235, 0.12);
+  --role-hiring_manager: #b45309;
+  --role-hiring_manager-bg: rgba(180, 83, 9, 0.12);
+  --role-interviewer: #6d28d9;
+  --role-interviewer-bg: rgba(109, 40, 217, 0.12);
+  --role-candidate: #0f9d6b;
+  --role-candidate-bg: rgba(15, 157, 107, 0.12);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --accent: #9083ff;
+  --accent-2: #34d3e6;
+  --accent-strong: #a599ff;
+  --accent-gradient: linear-gradient(135deg, #8a7bff 0%, #2fc2dd 100%);
+  --accent-gradient-soft: linear-gradient(135deg, rgba(144, 131, 255, 0.18), rgba(52, 211, 230, 0.14));
+
+  --success: #4ade80;
+  --success-bg: rgba(74, 222, 128, 0.14);
+  --warning: #fbbf24;
+  --warning-bg: rgba(251, 191, 36, 0.14);
+  --danger: #f87171;
+  --danger-bg: rgba(248, 113, 113, 0.14);
+
+  --bg: #05060f;
+  --bg-elevated: #0b0d1e;
+  --surface: rgba(255, 255, 255, 0.045);
+  --surface-solid: #10132a;
+  --surface-border: rgba(255, 255, 255, 0.09);
+  --surface-hover: rgba(255, 255, 255, 0.05);
+  --overlay-blur: 20px;
+
+  --text-primary: #f2f4fb;
+  --text-secondary: #a3aac2;
+  --text-muted: #656e88;
+  --text-on-accent: #06070f;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.55);
+  --shadow-glow: 0 0 48px rgba(144, 131, 255, 0.22);
+
+  --grid-line: rgba(255, 255, 255, 0.05);
+
+  --role-recruiter: #60a5fa;
+  --role-recruiter-bg: rgba(96, 165, 250, 0.16);
+  --role-hiring_manager: #fbbf24;
+  --role-hiring_manager-bg: rgba(251, 191, 36, 0.16);
+  --role-interviewer: #c4b5fd;
+  --role-interviewer-bg: rgba(196, 181, 253, 0.16);
+  --role-candidate: #4ade80;
+  --role-candidate-bg: rgba(74, 222, 128, 0.16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-standard: 0ms;
+    --duration-slow: 0ms;
+  }
+}

@@ -1,0 +1,58 @@
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 56px;
+  height: 30px;
+  padding: 3px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--surface-border);
+  background: var(--surface-hover);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.switch:hover {
+  border-color: var(--accent);
+}
+
+.icon {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  transition: color var(--duration-standard) var(--ease-standard);
+}
+
+.iconSun {
+  left: 7px;
+}
+.iconMoon {
+  right: 7px;
+}
+
+.thumb {
+  position: relative;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent-gradient);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--duration-standard) var(--ease-standard);
+  transform: translateX(0);
+}
+
+.switch[aria-checked="true"] .thumb {
+  transform: translateX(26px);
+}
+
+.switch[aria-checked="true"] .iconMoon {
+  color: var(--accent-2);
+}
+.switch[aria-checked="false"] .iconSun {
+  color: var(--accent);
+}

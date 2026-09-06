@@ -1,0 +1,81 @@
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import Logo from "./Logo";
+import ThemeToggle from "./ThemeToggle";
+import BackgroundFX from "./BackgroundFX";
+import { IconLogout } from "./icons";
+import styles from "./AppShell.module.css";
+
+const ROLE_LABELS = {
+  recruiter: "Recruiter",
+  hiring_manager: "Hiring manager",
+  interviewer: "Interviewer",
+  candidate: "Candidate",
+};
+
+function initials(name) {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  return (parts[0][0] + (parts[1]?.[0] || "")).toUpperCase();
+}
+
+/**
+ * Layout for every authenticated page: sticky nav (logo, primary nav, theme
+ * toggle, user chip) + centered content column. Add a new authenticated
+ * page as a child route of this one in App.jsx — don't rebuild the nav.
+ */
+export default function AppShell() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  async function handleLogout() {
+    await logout();
+    navigate("/login", { replace: true });
+  }
+
+  return (
+    <div className={styles.shell}>
+      <BackgroundFX />
+      <header className={styles.nav}>
+        <Logo size="sm" />
+        <nav className={styles.navLinks}>
+          <NavLink
+            to="/dashboard"
+            className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ""}`}
+          >
+            Dashboard
+          </NavLink>
+          <NavLink
+            to="/settings/google"
+            className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ""}`}
+          >
+            Google
+          </NavLink>
+          <span className={styles.navLinkDisabled} title="Ships with Module 2">
+            Interviews
+          </span>
+        </nav>
+        <div className={styles.navActions}>
+          <ThemeToggle />
+          <span className={styles.userChip}>
+            <span className={styles.avatar}>{initials(user?.name)}</span>
+            <span className={styles.userMeta}>
+              <span className={styles.userName}>{user?.name}</span>
+              <span className="text-muted" style={{ fontSize: "0.68rem" }}>
+                {ROLE_LABELS[user?.role] || user?.role}
+              </span>
+            </span>
+          </span>
+          <button className="btn btn-ghost btn-sm" onClick={handleLogout} aria-label="Log out">
+            <IconLogout width={16} height={16} />
+          </button>
+        </div>
+      </header>
+      <main className={styles.main}>
+        <Outlet />
+      </main>
+    </div>
+  );
+}
+
+export { ROLE_LABELS, initials };

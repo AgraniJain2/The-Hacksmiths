@@ -28,7 +28,8 @@ decided and built**, not the raw brief.
 | Event Creation & Dispatch (Meet link, emails, .ics) | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-7--event-creation--dispatch) |
 | Post-Booking Exception Handling (reminders, cancel/reschedule both parties) | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-8--post-booking--exception-handling) |
 | Notification Service (shared) | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#shared-notification-service) |
-| Frontend | 🔲 Not started | — |
+| Frontend — Setup & Auth pages (login, callback, dashboard shell, Google connection) | ✅ Built | [FRONTEND_DESIGN_SYSTEM.md](FRONTEND_DESIGN_SYSTEM.md) |
+| Frontend — remaining pages (one per module above) | 🔲 Not started | [FRONTEND_DESIGN_SYSTEM.md](FRONTEND_DESIGN_SYSTEM.md#adding-a-new-authenticated-page) |
 
 ## Doc map
 
@@ -50,6 +51,10 @@ decided and built**, not the raw brief.
 - **[CONVENTIONS.md](CONVENTIONS.md)** — rules everyone's code needs to follow
   (secrets, error handling, RBAC pattern) — these map directly to hackathon
   evaluation criteria, not just style preference.
+- **[FRONTEND_DESIGN_SYSTEM.md](FRONTEND_DESIGN_SYSTEM.md)** — the frontend's
+  design tokens, theming (light/dark), shared components/layout, routing and
+  API-client conventions. **Read this before building any new page** — it's
+  the frontend equivalent of `MODULE_GUIDE.md` + `CONVENTIONS.md` combined.
 
 ## Repo layout
 
@@ -64,6 +69,14 @@ backend/
   requirements.txt
   .env         — real secrets, gitignored, ask a teammate for values (never re-share in chat)
   .env.example — the template, safe to commit
+frontend/
+  src/
+    lib/api.js     — the only file that calls the backend
+    context/       — ThemeContext (light/dark), AuthContext (current user)
+    components/    — shared building blocks (AppShell, ThemeToggle, GoogleConnectionCard, icons, ...)
+    pages/         — one route each (Login, AuthComplete, Dashboard, GoogleConnection, ...)
+    styles/        — tokens.css (design tokens) + global.css (shared utility classes)
+  see FRONTEND_DESIGN_SYSTEM.md for the full design system
 Documentation/ — you are here
 workflow.txt   — quick-glance ASCII mirror of WORKFLOW.md's stages (WORKFLOW.md is the maintained source of truth)
 ```

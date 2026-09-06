@@ -1,0 +1,29 @@
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+}
+
+.ring {
+  border-radius: 50%;
+  border: 2.5px solid var(--surface-border);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+.label {
+  font-size: var(--text-sm);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ring {
+    animation-duration: 1.6s;
+  }
+}
