@@ -12,10 +12,21 @@ dependencies = [
     "langchain-mcp-adapters>=0.3.2",
     "langgraph>=1.2.11",
     "mcp>=1.29.1",
+    "pydantic>=2.7",
+    "tzdata>=2024.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
 ]
 
 [project.scripts]
 hacksmiths = "hacksmiths:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]
