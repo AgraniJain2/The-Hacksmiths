@@ -24,7 +24,7 @@ decided and built**, not the raw brief.
 | Candidate Availability Collection | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-3--candidate-availability-collection) |
 | Interviewer Pool Feasibility Check | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-4--interviewer-pool-feasibility-check) |
 | Candidate Slot Selection | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-5--candidate-slot-selection) |
-| Interviewer Assignment & Cascade (load-balanced, sequential) | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-6--interviewer-assignment--cascade) |
+| N-Seat Interviewer Assignment (load-balanced, per-seat cascade) | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-6--n-seat-interviewer-assignment) |
 | Event Creation & Dispatch (Meet link, emails, .ics) | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-7--event-creation--dispatch) |
 | Post-Booking Exception Handling (reminders, cancel/reschedule both parties) | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-8--post-booking--exception-handling) |
 | Notification Service (shared) | 🔲 Not started | [MODULE_GUIDE.md](MODULE_GUIDE.md#shared-notification-service) |
@@ -32,7 +32,7 @@ decided and built**, not the raw brief.
 
 ## Doc map
 
-- **[WORKFLOW.md](WORKFLOW.md)** — the end-to-end flow we agreed on (7 stages), with the
+- **[WORKFLOW.md](WORKFLOW.md)** — the end-to-end flow we agreed on (8 stages), with the
   open questions we resolved and why. Read this before touching any module — it's
   the contract everyone's building against.
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — tech stack, why we picked it, and the
@@ -65,7 +65,7 @@ backend/
   .env         — real secrets, gitignored, ask a teammate for values (never re-share in chat)
   .env.example — the template, safe to commit
 Documentation/ — you are here
-workflow.txt   — original ASCII workflow diagram (superseded by WORKFLOW.md, kept for history)
+workflow.txt   — quick-glance ASCII mirror of WORKFLOW.md's stages (WORKFLOW.md is the maintained source of truth)
 ```
 
 ## Ground rules that apply to every module (from the hackathon guidelines)

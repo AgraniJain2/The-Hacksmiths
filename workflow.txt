@@ -1,95 +1,119 @@
 +-------------------------------------------------------------+
-|                      1. Setup & Auth                         |
-|  - Everyone (recruiters/interviewers/candidates) logs in     |
-|    via Google OAuth (RBAC by role)                           |
-|  - Connect Google Calendar / Gmail permissions               |
+|                      1. Setup & Auth                          |
+|  - Everyone (recruiters/interviewers/candidates) logs in      |
+|    via Google OAuth (RBAC by role) -- finalized, single       |
+|    auth method, no email/password or SSO alternative          |
+|  - Connect Google Calendar / Gmail permissions                |
 +------------------------------+------------------------------+
                                |
                                v
 +-------------------------------------------------------------+
-|              2. Create Interview Request                     |
-|  - Recruiter defines: Interview Type (e.g. TECHNICAL_ROUND_1)|
-|  - Required Skills (e.g. ["React", "System Design"])         |
-|  - Required Seniority (e.g. SENIOR)                           |
-|  - Duration, buffer time (e.g. 15m)                           |
-|  - Add candidate details (Email, Time zone)                  |
-|  - NOTE: no named panelist, no panelist count -- always       |
-|    exactly ONE interviewer, chosen automatically in step 6   |
-|  - (Optional) Hiring manager named explicitly, not pooled    |
+|              2. Create Interview Request                      |
+|  - Recruiter defines: Interview Type (e.g. TECHNICAL_ROUND_1) |
+|  - Required Skills (e.g. ["React", "System Design"])          |
+|  - Required Seniority (e.g. SENIOR)                            |
+|  - Number of panelists required (N)                            |
+|  - Duration, buffer time (e.g. 15m)                            |
+|  - Add candidate details (Email, Time zone)                   |
+|  - NOTE: no named panelist -- all N seats are filled           |
+|    automatically in step 6                                     |
+|  - (Optional) Hiring manager named explicitly, not pooled     |
 +------------------------------+------------------------------+
                                |
                                v
 +-------------------------------------------------------------+
-|         2B. Interviewer Pool Profile (parallel/ongoing)       |
-|  - Each interviewer declares: skills, seniority level,        |
-|    qualified interview types, active/inactive toggle         |
+|         2B. Interviewer Pool Profile (parallel/ongoing)        |
+|  - Each interviewer declares: skills, seniority level,         |
+|    qualified interview types, active/inactive toggle          |
+|  - Each interviewer declares: timezone + working hours         |
+|    (default 09:00-18:00 in their own timezone)                 |
 +------------------------------+------------------------------+
                                |
                                v
 +-------------------------------------------------------------+
-|         3. Candidate Availability Collection                 |
-|  - Generate unique signed invitation link                    |
-|  - Candidate logs in via the link, submits free time windows |
-|    in their own time zone                                    |
+|         3. Candidate Availability Collection                  |
+|  - Generate unique signed invitation link                     |
+|  - Candidate logs in via the link, submits free time windows  |
+|    in their own time zone                                      |
 +------------------------------+------------------------------+
                                |
                                v
 +-------------------------------------------------------------+
-|         4. Interviewer Pool Feasibility Check                 |
+|         4. Interviewer Pool Feasibility Check                  |
 |  - Filter pool by skills + seniority + interview type + active|
-|  - Fetch Free/Busy via Calendar API for eligible interviewers |
-|  - Keep only candidate windows with >=1 eligible+free person  |
-|    (binary feasibility, not a ranked list -- ranking happens  |
-|    later, once a time is fixed)                               |
+|  - Fetch Free/Busy via Calendar API for eligible interviewers  |
+|  - For each candidate window, keep only interviewers who are: |
+|      (a) calendar-free                                         |
+|      (b) within THEIR configured working hours (own timezone) |
+|      (c) buffer-respecting around adjacent events               |
+|  - Keep candidate windows with >= N interviewers passing        |
+|    all three checks (binary feasibility; ranking happens        |
+|    later once a time is fixed)                                  |
 +------------------------------+------------------------------+
                                |
                                v
 +-------------------------------------------------------------+
-|         5. Candidate Slot Selection                           |
-|  - Candidate views feasible slots in their local time zone    |
-|    and picks exactly one                                      |
+|         5. Candidate Slot Selection                            |
+|  - Candidate views feasible slots in their local time zone     |
+|    and picks exactly one                                        |
 +------------------------------+------------------------------+
                                |
                                v
 +-------------------------------------------------------------+
-|      6. Interviewer Assignment & Cascade (sequential)          |
-|  - Rank eligible+free-at-that-time interviewers:               |
-|      1) lowest rolling 7-day confirmed interview count         |
-|         (burnout prevention / load balancing)                  |
-|      2) tie-break: least recently assigned (round-robin)       |
-|  - Lock + reserve the #1-ranked person, send them an           |
-|    accept/decline notification (signed link, no login needed)  |
-|      [Accepted]  ---> proceed to step 7                        |
-|      [Declined / no response before timeout] --->              |
-|            re-rank remaining pool, offer to next person,       |
-|            repeat until accepted or pool exhausted             |
-|      [Pool exhausted] ---> escalate to recruiter /              |
-|            ask candidate to re-pick a slot                     |
+|      6. N-Seat Interviewer Assignment                           |
+|  - Recompute eligible+feasible interviewers live for the       |
+|    fixed chosen time (same 3 checks as step 4)                 |
+|  - Rank them:                                                  |
+|      1) lowest rolling 7-day confirmed interview count          |
+|         (burnout prevention / load balancing)                   |
+|      2) tie-break: least recently assigned (round-robin)        |
+|  - Offer to the TOP N in PARALLEL -- one offer per open seat,   |
+|    to N distinct people (no broadcast to the whole pool)        |
+|  - Each seat tracked independently:                              |
+|      [Accepted]  ---> that seat is filled                       |
+|      [Declined / no response before timeout] --->                |
+|            re-rank remaining pool for THAT SEAT ONLY,            |
+|            offer to next person, repeat                          |
+|      [Pool exhausted for a seat] ---> escalate to recruiter /     |
+|            ask candidate to re-pick a slot                        |
+|  - Once all N seats are Accepted --> proceed to step 7            |
+|  - Lock: reserve the target interviewer's profile row at the     |
+|    moment each offer is created, so no one person gets double-   |
+|    booked across two different interviews' overlapping times     |
 +------------------------------+------------------------------+
                                |
                                v
 +-------------------------------------------------------------+
-|            7. Event Creation & Dispatch                       |
-|  - Generate Google Meet link via Calendar API                 |
-|    (conferenceData on the same events.insert call)             |
-|  - Create calendar event for candidate + hiring manager        |
-|    (if any) + the one assigned interviewer                     |
-|  - Send confirmation emails with .ics calendar invites         |
+|            7. Event Creation & Dispatch                        |
+|  - Generate Google Meet link via Calendar API                  |
+|    (conferenceData on the same events.insert call)              |
+|  - Create ONE calendar event for candidate + hiring manager     |
+|    (if any) + all N confirmed interviewers                      |
+|  - Send confirmation emails with .ics calendar invites          |
 +------------------------------+------------------------------+
                                |
                                v
 +-------------------------------------------------------------+
-|            8. Post-Booking & Exception Handling                |
-|  - Scheduled job sends reminders before the interview          |
-|  - Candidate cancels/reschedules:                               |
-|       -> release assigned interviewer, notify them,            |
-|          restart from step 3 with new availability             |
-|  - Assigned interviewer cancels (after accepting):              |
-|       -> release just that one assignment, re-run step 6's     |
-|          ranking/cascade for the SAME fixed time, excluding    |
-|          them; candidate's confirmed time doesn't move unless  |
-|          the pool is exhausted (same escalation as step 6)     |
+|            8. Post-Booking & Exception Handling                 |
+|  - Scheduled job sends reminders before the interview           |
+|  - Candidate cancels/reschedules:                                |
+|       -> release ALL N confirmed interviewer seats, notify      |
+|          them, restart from step 3 with new availability        |
+|  - ANY ONE confirmed interviewer cancels (after accepting):       |
+|       -> release just THAT ONE seat, re-run step 6's ranking/   |
+|          cascade for that seat only, same fixed time,            |
+|          excluding them; candidate's confirmed time and the      |
+|          other confirmed interviewers are untouched unless the   |
+|          pool is exhausted for that seat (same escalation as     |
+|          step 6)                                                  |
 +-------------------------------------------------------------+
+
+Known, consciously accepted gaps (not addressed by this version):
+  - Recruiter's and the named hiring manager's own calendars are NOT
+    checked against the chosen time -- only the interviewer pool is.
+  - Single auth method (Google OAuth) only, despite the brief mentioning
+    multiple auth options.
+  - No sequence diagrams, audit/analytics dashboard, SMS, or Zoom yet.
 
 See Documentation/WORKFLOW.md for the full explanation, the mermaid version
 of this diagram, the decisions behind each stage, and how each stage maps to

@@ -7,7 +7,7 @@
 | Backend | Python + FastAPI | Async-native, typed request/response models via Pydantic, mature Google API client libraries (`google-auth`, `google-api-python-client`) that we depend on heavily. |
 | ORM / migrations | SQLAlchemy + Alembic | Explicit schema, reviewable migrations — important with several people extending the same tables (`Interview` especially). |
 | Database (dev) | SQLite (`backend/dev.db`) | Zero setup — anyone can clone and run without installing a DB server. |
-| Database (prod / scale demo) | PostgreSQL | Needed the moment any feature relies on row-level locking (`SELECT ... FOR UPDATE` when creating an interviewer offer — see [WORKFLOW.md](WORKFLOW.md#6-interviewer-assignment--cascade)) or handles concurrent writers. SQLite's locking is coarser (whole-file), which is fine for a single-dev happy-path demo but not for proving the race-condition guard actually works. |
+| Database (prod / scale demo) | PostgreSQL | Needed the moment any feature relies on row-level locking (`SELECT ... FOR UPDATE` when creating an interviewer offer — see [WORKFLOW.md](WORKFLOW.md#6-n-seat-interviewer-assignment)) or handles concurrent writers. SQLite's locking is coarser (whole-file), which is fine for a single-dev happy-path demo but not for proving the race-condition guard actually works. |
 | Auth | Google OAuth 2.0 (Authorization Code + offline access) | We need standing access to Calendar/Gmail on the user's behalf *after* they've left the browser (background scheduling, reminders) — that requires a refresh token, which only the offline-access OAuth flow provides. See [AUTH_MODULE.md](AUTH_MODULE.md). |
 | External APIs | Google Calendar API, Gmail API | Free/busy checks, event creation with Meet conferencing, and sending notifications, all through the same Google identity a user already has. |
 | Frontend | Not yet decided/built | — |
@@ -69,22 +69,27 @@ events. Modeling that in a document store means duplicating relationships or
 doing joins in application code. We also need transactional guarantees (the
 interviewer-assignment lock, see below) that SQL gives natively.
 
-**Why sequential assignment instead of broadcasting to the whole interviewer
+**Why rank-and-offer-to-top-N instead of broadcasting to the whole interviewer
 pool at once?**
 An earlier version of this design had the system notify every eligible pool
-member simultaneously and let whoever accepted first claim the seat — that
-needs an N-way race guard (multiple simultaneous acceptances competing for a
-limited number of seats). We moved to deterministic, load-balanced ranking
-instead: compute who's eligible and free, pick the one with the lowest
-recent interview count, and only ask the *next*-ranked person if the current
-one declines or times out. This is simpler to reason about and implement
-correctly (only one offer is ever outstanding per interview, so there's no
-multi-way race), and it directly produces fair load distribution as a side
-effect rather than needing a separate fairness pass. The trade-off: a
-cascade through several declines is slower to land a booking than a
-broadcast would be — acceptable for interview scheduling, where minutes of
-extra latency don't matter, but would be the wrong call for something
-latency-sensitive.
+member simultaneously and let whoever accepted first claim a seat — that
+needs a seats-counter race guard (many simultaneous acceptances competing for
+a limited number of seats), and it optimizes for "who clicked fastest"
+rather than fairness, which fights the load-balancing goal directly (the
+fastest responder isn't necessarily the least-loaded one). We settled on a
+middle ground: rank the eligible-and-feasible pool by load, and offer to
+**exactly** the top N — one offer per open seat, never more. This keeps the
+determinism and fairness of a pure sequential design (only ever N offers
+outstanding, no seats-counter race) while still being as fast as a broadcast
+in the common case where all N invited people simply accept. The one
+remaining race — two *different* interviews independently offering the same
+top-ranked person overlapping times — is guarded by a per-interviewer row
+lock at offer-creation time, not a seats counter. A decline or timeout on any
+one seat cascades only that seat to the next-ranked candidate; the other
+confirmed seats are untouched. Trade-off: a cascade through several declines
+on one seat is slower than a broadcast would be for *that* seat — acceptable
+for interview scheduling, where minutes of extra latency don't matter, but
+would be the wrong call for something latency-sensitive.
 
 **Why REST over GraphQL?**
 Small, fixed set of resources (interviews, slots, bookings) with no deep

@@ -9,7 +9,7 @@ exist as minimal stubs (see below) — everything else on this page is **spec
 for Module 2 onward, not yet in code.** Build against this spec; don't treat
 its absence from `models.py` as a discrepancy to "fix" without discussion,
 since it reflects the interviewer-pooling redesign (see
-[WORKFLOW.md](WORKFLOW.md#what-changed-from-the-original-plan)).
+[WORKFLOW.md](WORKFLOW.md#revision-history-interviewer-pooling-so-nobodys-confused-reading-old-context)).
 
 ## Tables that exist today (built)
 
@@ -39,18 +39,21 @@ Currently just `id, title, status, created_by, created_at`. Extend with:
 | Column | Type | Notes |
 |---|---|---|
 | `interview_type` | enum: `SCREENING`, `TECHNICAL_ROUND_1`, `TECHNICAL_ROUND_2`, `MANAGERIAL`, `HR` (extend as needed) | |
-| `required_skills` | JSON array of strings | e.g. `["React", "System Design"]` — matched against `InterviewerProfile.skills` |
+| `required_skills` | JSON array of strings | e.g. `["React", "System Design"]` — interviewer must match **all**, not any-overlap |
 | `required_seniority` | enum: `JUNIOR`, `MID`, `SENIOR`, `STAFF` | minimum seniority to be pool-eligible |
+| `panelists_required` | int | **N** — how many distinct interviewer seats this interview needs. Recruiter-specified at creation. |
 | `hiring_manager_id` | string, FK → `users.id`, nullable | named explicitly by the recruiter, **not** pool-matched |
-| `assigned_interviewer_id` | string, FK → `users.id`, nullable | set once Stage 6 lands an acceptance; null while unassigned/mid-cascade |
 | `candidate_email`, `candidate_timezone` | string | |
 | `duration_minutes`, `buffer_minutes` | int | |
-| `status` | enum: `draft`, `collecting_availability`, `awaiting_candidate_selection`, `assigning_interviewer`, `scheduled`, `cancelled`, `completed`, `needs_recruiter_action` | `needs_recruiter_action` = Stage 6's pool exhausted or Stage 4 found zero feasible slots |
+| `status` | enum: `draft`, `collecting_availability`, `awaiting_candidate_selection`, `assigning_interviewers`, `scheduled`, `cancelled`, `completed`, `needs_recruiter_action` | `needs_recruiter_action` = Stage 4 found zero feasible slots, or Stage 6 exhausted the pool for an open seat |
 | `confirmed_start_utc`, `confirmed_end_utc` | datetime, nullable | set once Stage 6 completes. Kept directly on `Interview` rather than a separate `Booking` table since an interview has at most one *active* confirmed time; a reschedule replaces these values rather than creating a parallel row |
 | `calendar_event_id`, `meeting_link` | string, nullable | set by Module 7 after creating the Calendar event |
 
-No panelist-count field — every interview needs exactly one
-`assigned_interviewer_id`, filled by Stage 6.
+`panelists_required` is checked against the *count* of `confirmed`
+`InterviewParticipant` rows with `role = 'panelist'` for this interview —
+there's no separate `panelists_confirmed` counter column, for the same
+reason load stats aren't stored counters either (see `InterviewerProfile`
+below): a live count can't drift out of sync with cancellations.
 
 ### `InterviewerProfile` (new — Module 2B)
 One row per interviewer, separate from `User` so not every user needs pool
@@ -64,6 +67,8 @@ metadata (candidates/recruiters don't have one).
 | `seniority` | enum: `JUNIOR`, `MID`, `SENIOR`, `STAFF` | |
 | `qualified_interview_types` | JSON array of the `interview_type` enum values | which rounds this person can run |
 | `active` | bool, default true | opt-out toggle for "don't assign me right now" (leave, overloaded) — independent of calendar busy/free |
+| `timezone` | string (IANA, e.g. `Asia/Kolkata`) | **required** — working hours are meaningless without knowing what timezone they're in |
+| `working_hours_start`, `working_hours_end` | time-of-day (e.g. `09:00`, `18:00`) | defaults to `09:00`–`18:00` in the interviewer's own `timezone` if never customized. This is what Module 4/6 clip candidate-matched slots to — raw Calendar free/busy alone would happily call 11pm "free" just because nothing's booked then |
 | `updated_at` | datetime | |
 
 **No `current_weekly_interviews` or `last_interview_at` columns here** —
@@ -103,10 +108,10 @@ Candidate submits one or more free windows rather than a single slot.
 | `start_utc`, `end_utc` | datetime | stored in UTC; convert to/from the candidate's timezone only at the edges (display, input) |
 
 ### `InterviewSlotOffer` (new — Module 6)
-One row per attempt to assign a specific interviewer to the interview's
-already-fixed time. **Sequential, not parallel** — at most one non-terminal
-(`OFFERED`) row should exist per interview at any moment, since only the
-current top-ranked candidate is ever asked.
+One row per attempt to assign a specific interviewer to one of the
+interview's open seats, at the interview's already-fixed time. **Up to
+`panelists_required` non-terminal (`OFFERED`) rows can exist per interview at
+once** — one per open seat, never more.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -114,44 +119,50 @@ current top-ranked candidate is ever asked.
 | `interview_id` | string, FK → `interviews.id` | |
 | `interviewer_user_id` | string, FK → `users.id` | |
 | `proposed_start_utc`, `proposed_end_utc` | datetime | the time the candidate picked in Stage 5 — identical across every offer row tied to one interview |
-| `status` | enum: `OFFERED`, `ACCEPTED`, `DECLINED`, `EXPIRED` | `EXPIRED` = no response before `expires_at` — triggers the same cascade as an explicit decline |
+| `status` | enum: `OFFERED`, `ACCEPTED`, `DECLINED`, `EXPIRED` | `EXPIRED` = no response before `expires_at` — triggers the same per-seat cascade as an explicit decline |
 | `offered_at`, `responded_at`, `expires_at` | datetime | `expires_at` drives the cascade timeout, checked by the same scheduled job that sends reminders (Module 8) |
 
-If your DB supports partial unique indexes (Postgres does; SQLite does too,
-as of 3.8+), enforce "at most one `OFFERED` row per interview" at the DB
-level: `CREATE UNIQUE INDEX ... ON interview_slot_offers(interview_id) WHERE status = 'OFFERED'`.
+Enforce "at most `panelists_required` `OFFERED` rows per interview" in
+application logic inside the assignment transaction (a straight count check
+before inserting) — a single global partial-unique-index trick (which worked
+cleanly for the old N=1 design) doesn't extend to "at most N" without a
+covering/filtered index keyed off a running count, which is more DB-specific
+machinery than it's worth here.
 
-**Assignment transaction** (on creating a new offer, whether the first one or
-a cascade step): lock the target interviewer's `InterviewerProfile` row
+**Assignment transaction** (creating any offer — initial batch or a cascade
+step for one seat): lock the target interviewer's `InterviewerProfile` row
 (`SELECT ... FOR UPDATE`), re-check they have no other `OFFERED` or confirmed
 `InterviewParticipant` overlapping the proposed time (guards against a
-*different* interview grabbing the same person for an overlapping slot in the
-gap between two concurrent assignment attempts), then insert the `OFFERED`
-row. This is a narrower lock than a seats-counter would need — one row, one
-person, one check — because only one offer is ever live at a time.
+*different* interview grabbing the same person for an overlapping slot),
+then insert the `OFFERED` row. One row, one person, one check — this is
+per-seat, not a seats-counter lock, because offers are always exactly 1:1
+with open seats.
 
-**On acceptance**: mark this offer `ACCEPTED`, create the `InterviewParticipant`
-row, set `Interview.assigned_interviewer_id` + `status = scheduled`, proceed
-to Module 7.
+**On acceptance**: mark this offer `ACCEPTED`, create the
+`InterviewParticipant` row for this seat. Once the count of `confirmed`
+`InterviewParticipant` (`role='panelist'`) rows for this interview reaches
+`panelists_required`, set `Interview.status = scheduled` and proceed to
+Module 7.
 
 **On decline/expiry**: mark this offer `DECLINED`/`EXPIRED`, recompute the
-ranking excluding every interviewer already tried for this interview, and
-either create the next `OFFERED` row or — if nobody's left — set
-`Interview.status = needs_recruiter_action`.
+ranking excluding every interviewer already tried for *this seat's line of
+offers* (interviewers already confirmed on other seats of the same interview
+are also excluded, obviously), and either create the next `OFFERED` row for
+this seat or — if nobody's left — set `Interview.status = needs_recruiter_action`.
 
 ### `InterviewParticipant` (new — confirmed roster only)
 Created only once someone is actually locked in — a hiring manager at
-creation time, or the assigned interviewer on acceptance. Not where pending
+creation time, or an interviewer on offer acceptance. Not where pending
 offers live (that's `InterviewSlotOffer`) — this is the final roster, and
-also what the load-balancing queries above read from.
+also what the load-balancing and `panelists_required` count queries read from.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | string (UUID) | PK |
 | `interview_id` | string, FK → `interviews.id` | |
 | `user_id` | string, FK → `users.id` | |
-| `role` | enum: `hiring_manager`, `panelist` | at most one `panelist` row per interview now that there's no panel, just a single assigned interviewer |
-| `status` | enum: `confirmed`, `cancelled` | flipped to `cancelled` when the assigned interviewer backs out post-acceptance (Stage 8), which is what triggers the replacement cascade — and what makes them fall out of the live load-balancing count automatically |
+| `role` | enum: `hiring_manager`, `panelist` | up to `panelists_required` `panelist` rows per interview now |
+| `status` | enum: `confirmed`, `cancelled` | flipped to `cancelled` when a confirmed interviewer backs out post-acceptance (Stage 8), which is what triggers that one seat's replacement cascade — and what makes them fall out of the live `panelists_required` count and load-balancing count automatically |
 | `created_at` | datetime | this is the timestamp the load-balancing queries above key off of |
 
 ### `InviteToken` (existing, unchanged)
@@ -165,11 +176,10 @@ erDiagram
     USER ||--o| OAUTH_TOKEN : has
     USER ||--o| INTERVIEWER_PROFILE : has
     USER ||--o{ INTERVIEW : "created_by (recruiter)"
-    USER ||--o| INTERVIEW : "assigned_interviewer_id"
     INTERVIEW ||--o{ CANDIDATE_AVAILABILITY_WINDOW : "candidate submits"
-    INTERVIEW ||--o{ INTERVIEW_SLOT_OFFER : "sequential offers"
+    INTERVIEW ||--o{ INTERVIEW_SLOT_OFFER : "up to N concurrent offers"
     USER ||--o{ INTERVIEW_SLOT_OFFER : "receives"
-    INTERVIEW ||--o{ INTERVIEW_PARTICIPANT : "confirmed roster"
+    INTERVIEW ||--o{ INTERVIEW_PARTICIPANT : "confirmed roster (up to N panelists + 1 hiring manager)"
     USER ||--o{ INTERVIEW_PARTICIPANT : "participates as"
     INTERVIEW ||--o{ INVITE_TOKEN : "issued for"
 ```

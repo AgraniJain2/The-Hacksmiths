@@ -23,8 +23,8 @@ call out. See the shared section at the bottom before starting Module 6.
 
 ## Module 2 — Interview Request
 
-**Goal**: recruiter creates an interview request — the thing every later
-stage operates on. No named panelist, no panelist count — just requirements.
+**Goal**: recruiter creates an interview request — requirements only, no
+named panelist.
 
 **Depends on**: `get_current_user` (only recruiters/hiring_managers should be
 able to create one — check `user.role`), the `Interview` stub in
@@ -33,43 +33,46 @@ able to create one — check `user.role`), the `Interview` stub in
 **Build**:
 - Extend `Interview` per [DATA_MODEL.md](DATA_MODEL.md#interview-extend-the-existing-stub):
   `interview_type`, `required_skills`, `required_seniority`,
-  `hiring_manager_id`, candidate email/timezone, duration/buffer, the new
-  `status` enum.
+  **`panelists_required`**, `hiring_manager_id`, candidate email/timezone,
+  duration/buffer, the new `status` enum.
 - `POST /interviews` — create one (recruiter/hiring_manager only). Validates
-  `required_skills` is non-empty, `duration_minutes > 0`, candidate email is
-  well-formed.
-- `GET /interviews/{id}` — fetch details + current status.
-- On creation, mint an `InviteToken` (see [DATA_MODEL.md](DATA_MODEL.md#invitetoken-existing-unchanged))
-  for the candidate and hand it to the Notification Service to email — this
-  is the link the candidate uses to log in and eventually pick a slot.
+  `required_skills` non-empty, `duration_minutes > 0`, **`panelists_required >= 1`**,
+  candidate email well-formed.
+- `GET /interviews/{id}` — fetch details + current status + how many seats
+  are confirmed so far (`count of InterviewParticipant role='panelist' status='confirmed'` vs `panelists_required`).
+- On creation, mint an `InviteToken` for the candidate and hand it to the
+  Notification Service to email.
 
-**Edge cases**: empty/malformed candidate email, zero-length `required_skills`,
-duration of 0 or negative, `required_seniority` not matching any active
-interviewer at all (arguably should warn the recruiter at creation time
-rather than only failing silently later in Stage 4).
+**Edge cases**: empty/malformed candidate email, zero-length
+`required_skills`, `panelists_required` higher than the number of currently
+active interviewers matching the skill/seniority/type combo at all (worth a
+warning at creation time, not just a silent failure later in Stage 4).
 
 ---
 
 ## Module 2B — Interviewer Pool Profile
 
-**Goal**: let interviewers declare what they're qualified for, and toggle
-whether they're currently available to be assigned.
+**Goal**: let interviewers declare what they're qualified for, their working
+hours, and toggle availability for assignment.
 
 **Depends on**: `get_current_user` with `role == "interviewer"`.
 
 **Build**:
-- `InterviewerProfile` table, per [DATA_MODEL.md](DATA_MODEL.md#interviewerprofile-new--module-2b).
+- `InterviewerProfile` table, per [DATA_MODEL.md](DATA_MODEL.md#interviewerprofile-new--module-2b)
+  — **including `timezone`, `working_hours_start`, `working_hours_end`**,
+  which is new in this revision.
 - `PUT /me/interviewer-profile` — upsert your own skills/seniority/qualified
-  types/active flag. Interviewer-only.
+  types/active flag/timezone/working hours. Interviewer-only. Default working
+  hours to `09:00`–`18:00` in whatever timezone they report if they don't
+  set custom ones.
 - `GET /me/interviewer-profile` — read your own.
-- Consider whether profile edits need approval (e.g., can anyone self-declare
-  `STAFF` seniority?) — simplest for hackathon scope: self-declared, no
-  approval workflow, flagged here as a known simplification if asked about
-  it in the walkthrough.
+- Self-declared, no approval workflow — simplest for hackathon scope, flag
+  as a known simplification if asked in the walkthrough.
 
 **Edge cases**: an interviewer with `role == "interviewer"` who never creates
-a profile (should be treated as inactive/ineligible everywhere, not crash
-Module 4/6's queries — a plain `LEFT JOIN`/optional lookup, not an assumed row).
+a profile (treat as inactive/ineligible everywhere — an optional lookup, not
+an assumed row). A `working_hours_start` after `working_hours_end` (reject,
+don't silently produce an empty or inverted window).
 
 ---
 
@@ -79,61 +82,64 @@ Module 4/6's queries — a plain `LEFT JOIN`/optional lookup, not an assumed row
 time windows they're free.
 
 **Depends on**: candidate login already works (built — see
-[AUTH_MODULE.md](AUTH_MODULE.md)); a candidate hitting
-`/auth/google/login?invite_token=...` already gets a session with
-`role=candidate`.
+[AUTH_MODULE.md](AUTH_MODULE.md)).
 
 **Build**:
 - `CandidateAvailabilityWindow` table, per [DATA_MODEL.md](DATA_MODEL.md#candidateavailabilitywindow-new--module-3).
 - `POST /interviews/{id}/availability` — candidate-role-only, submits one or
-  more `{start, end}` windows in their own timezone (candidate should
-  explicitly confirm/select their timezone — never infer it silently from
-  browser locale or IP, per the earlier timezone-handling decision).
+  more `{start, end}` windows in their own timezone (explicit, never
+  inferred from browser locale/IP).
 - Update `Interview.status` to `collecting_availability` →
-  `awaiting_candidate_selection` once at least one window is submitted and
-  Module 4 has produced feasible slots.
+  `awaiting_candidate_selection` once Module 4 has produced feasible slots.
 
-**Edge cases**: overlapping submitted windows (dedupe/merge them), a window
-shorter than `duration_minutes + buffer_minutes` (not usable — filter it out
-rather than passing it through to Module 4 as if it were valid), candidate
-resubmitting availability after already picking a slot (should this replace
-prior windows or append? default to replace, since re-submission implies the
-old ones are stale).
+**Edge cases**: overlapping submitted windows (dedupe/merge), a window
+shorter than `duration_minutes + buffer_minutes` (filter out, don't pass
+through to Module 4 as valid), candidate resubmitting after already picking
+a slot (replace prior windows, don't append stale ones).
 
 ---
 
 ## Module 4 — Interviewer Pool Feasibility Check
 
-**Goal**: given an interview's requirements and the candidate's submitted
-windows, return which windows have *at least one* eligible, calendar-free
-interviewer — not a ranked list, just feasible/not.
+**Goal**: given an interview's requirements (including `panelists_required`)
+and the candidate's submitted windows, return which windows have **at least
+N** eligible, working-hours-respecting, calendar-free interviewers.
 
 **Depends on**: `get_valid_access_token(db, user_id)` from
-`app.auth.google_oauth` — this is the *only* way to get a usable Google
-access token; never touch `OAuthToken` rows directly. Also depends on
-Module 2B's `InterviewerProfile` data and Module 3's availability windows.
+`app.auth.google_oauth` — never touch `OAuthToken` rows directly. Also
+depends on Module 2B's `InterviewerProfile` (skills/seniority/type/active
+**and now timezone/working hours**) and Module 3's availability windows.
 
 **Build**:
 - Query eligible interviewers: `InterviewerProfile.active = true`,
   `required_seniority` satisfied, `interview_type` in
-  `qualified_interview_types`, skills overlap with `required_skills`
-  (decide subset-match vs. any-overlap-match — subset is stricter and
-  probably right: an interviewer needs *all* required skills, not just one).
-- For each eligible interviewer, call Calendar `freebusy.query` (via
-  `get_valid_access_token`) and check against each of the candidate's
-  submitted windows, minus `buffer_minutes` around existing events.
-- Return the subset of candidate windows where the eligible set is non-empty.
-  No ranking needed here — Module 6 does the ranking, and only once a
-  specific time is fixed.
-- **Explicit "no feasible slot" response** if the eligible set is empty for
-  every window — surface which constraint is the blocker (no active
-  interviewers with this skill set at all vs. everyone's just busy) so the
-  recruiter/candidate knows what to fix.
+  `qualified_interview_types`, **all** `required_skills` present (subset
+  match, not any-overlap).
+- For each eligible interviewer, for each candidate window, check **three**
+  conditions — all must hold for that sub-slot to count:
+  1. Calendar `freebusy.query` (via `get_valid_access_token`) shows them free
+  2. The sub-slot falls inside `working_hours_start`–`working_hours_end`,
+     **converted through that interviewer's own `timezone`** — never assume
+     a shared timezone across the pool, and never skip this check just
+     because the calendar says "free" (an empty calendar at 11pm is still
+     free, just not appropriate)
+  3. It respects `buffer_minutes` around that interviewer's adjacent events
+- A candidate window is feasible only if **at least `panelists_required`**
+  distinct interviewers pass all three checks for it.
+- **Explicit "insufficient coverage" response** if no window clears the bar
+  — say which constraint is the blocker (not enough qualified people at all,
+  vs. enough people but outside working hours, vs. everyone's just busy) so
+  the recruiter/candidate knows what to actually fix.
 
 **Edge cases**: an eligible interviewer with a dead Google connection
-(`ReauthRequired`) — don't let one broken connection silently exclude them
-from every slot forever without at least logging/surfacing that they need to
-reconnect. DST transitions — store/compare everything in UTC.
+(`ReauthRequired`) shouldn't silently vanish from every slot forever without
+surfacing that they need to reconnect. DST transitions — store/compare in
+UTC, convert to each interviewer's local time only for the working-hours
+check itself. A window where exactly N interviewers are feasible but one of
+them has borderline working hours (e.g., the slot is at their very last
+working minute) — don't special-case this, just apply the same clean
+boundary check as everywhere else (inclusive/exclusive, pick one and be
+consistent).
 
 ---
 
@@ -147,120 +153,126 @@ reconnect. DST transitions — store/compare everything in UTC.
 - `GET /interviews/{id}/slots` — candidate-role-only, returns the feasible
   windows converted to the candidate's timezone.
 - `POST /interviews/{id}/slots/select` — candidate picks one exact
-  `{start, end}`; sets `Interview.status = assigning_interviewer` and hands
+  `{start, end}`; sets `Interview.status = assigning_interviewers` and hands
   off to Module 6.
 
-**Edge cases**: idempotency (candidate double-clicking submit shouldn't
-trigger two separate Module 6 assignment attempts — check current
-`Interview.status` before proceeding), the picked slot no longer being
-feasible by the time they submit (re-validate against Module 4's logic at
-selection time, don't trust a stale client-side list).
+**Edge cases**: idempotency (double-submit shouldn't trigger two separate
+Module 6 assignment runs — check current `Interview.status` first), the
+picked slot no longer being feasible by submission time (re-validate against
+Module 4's logic live, don't trust a stale client-side list).
 
 ---
 
-## Module 6 — Interviewer Assignment & Cascade
+## Module 6 — N-Seat Interviewer Assignment
 
-**Goal**: the core new logic. Given the interview's now-fixed time, pick one
-interviewer deterministically, notify them, and cascade to the next on
-decline/timeout.
+**Goal**: the core logic. Given the interview's now-fixed time and
+`panelists_required` = N, fill all N seats with distinct interviewers,
+picked deterministically by load, with a fast parallel path and a
+per-seat fallback cascade.
 
-**Depends on**: `get_valid_access_token`, `InterviewerProfile`, the
-`InterviewSlotOffer` table, and the Notification Service (see below).
+**Depends on**: `get_valid_access_token`, `InterviewerProfile` (including
+working hours), the `InterviewSlotOffer` table, the Notification Service.
 
 **Build**:
-1. **Ranking function**: eligible-and-free-at-the-fixed-time interviewers
-   (same filter as Module 4, re-checked live), ordered by the two computed
-   queries in [DATA_MODEL.md](DATA_MODEL.md#interviewerprofile-new--module-2b)
-   — lowest rolling 7-day confirmed count first, least-recently-assigned as
-   tiebreak.
-2. **Offer creation** (used both for the first attempt and every cascade
-   step): in one transaction, lock the target interviewer's
+1. **Ranking function**: eligible-and-feasible-at-the-fixed-time
+   interviewers (same three-condition check as Module 4 — calendar-free,
+   within working hours, buffer-respecting — re-checked live), ordered by
+   the two computed queries in
+   [DATA_MODEL.md](DATA_MODEL.md#interviewerprofile-new--module-2b) — lowest
+   rolling 7-day confirmed count first, least-recently-assigned as tiebreak.
+2. **Initial batch**: take the top N from the ranking and create one
+   `InterviewSlotOffer` per seat, **in parallel** — this is the "top N
+   simultaneous offers" step, not a broadcast to the whole eligible pool
+   (only exactly N people get notified, one seat each).
+3. **Offer creation transaction** (used for the initial batch *and* every
+   later cascade step for a single seat): lock the target interviewer's
    `InterviewerProfile` row, re-verify no overlapping `OFFERED` or confirmed
-   `InterviewParticipant` exists for them, insert the `InterviewSlotOffer`
-   row (`status=OFFERED`, `expires_at` = now + your chosen timeout, e.g. 2
-   hours), then have the Notification Service send them the
-   accept/decline links (signed, single-use, same pattern as `InviteToken` —
-   reuse `hash_invite_token`-style hashing rather than inventing a new scheme).
-3. **`POST /offers/{id}/accept`** (via the signed link, no login required —
-   the signed token *is* the auth) — inside a transaction: verify the offer
-   is still `OFFERED` and not expired, mark it `ACCEPTED`, create the
-   `InterviewParticipant` row, set
-   `Interview.assigned_interviewer_id` + `status = scheduled`, then hand off
-   to Module 7.
-4. **`POST /offers/{id}/decline`** and the **expiry sweep** (a scheduled job,
-   same infra as Module 8's reminders, checking for `OFFERED` rows past
-   `expires_at`) both do the same thing: mark the offer `DECLINED`/`EXPIRED`,
-   re-run the ranking excluding everyone already offered this interview, and
-   either create the next offer or, if the ranked list is now empty, set
-   `Interview.status = needs_recruiter_action` and notify the recruiter.
+   `InterviewParticipant` exists for them (guards against a different
+   interview grabbing the same person moments apart), insert the offer row
+   (`expires_at` = now + your chosen timeout, e.g. 2 hours), then have the
+   Notification Service send accept/decline links (signed, single-use, same
+   pattern as `InviteToken`).
+4. **`POST /offers/{id}/accept`** (via the signed link, no login required):
+   in a transaction, verify the offer is still `OFFERED` and unexpired, mark
+   it `ACCEPTED`, create the `InterviewParticipant` row for that seat. If the
+   confirmed-panelist count now equals `panelists_required`, set
+   `Interview.status = scheduled` and hand off to Module 7 — otherwise, this
+   seat is just done; the other seats' offers continue independently.
+5. **`POST /offers/{id}/decline`** and the **expiry sweep** (scheduled job,
+   same infra as Module 8's reminders) both trigger the same per-seat
+   cascade: mark the offer `DECLINED`/`EXPIRED`, re-rank excluding everyone
+   already tried *for this seat* and everyone already confirmed on *any*
+   seat of this interview, and either create the next offer for this one
+   seat or — if nobody's left — set `Interview.status = needs_recruiter_action`.
 
-**Edge cases**: the interviewer who declines is the *only* eligible one
-(immediate escalation, no cascade possible) — test this path explicitly,
-it's the one evaluators are likely to probe ("what happens when nobody's
-available?"). An `accept`/`decline` link clicked twice (idempotent: second
-click on an already-`ACCEPTED`/`DECLINED` offer should return a clear
-"already handled" message, not double-book or crash).
+**Edge cases**: `panelists_required` greater than the total eligible pool
+size (immediate escalation for the seats that can never be filled — don't
+spin forever). Two seats' cascades independently trying to land on the same
+next-ranked candidate at the same moment (the per-offer lock in step 3
+handles this — whichever transaction commits first wins the row, the second
+sees the conflict and moves to the next candidate in its own ranking). All N
+initial offers declining simultaneously (should cascade all N seats
+independently and correctly, not just the first one).
 
 ---
 
 ## Module 7 — Event Creation & Dispatch
 
-**Goal**: once Module 6 lands an acceptance, create the real calendar event
-(with Meet link) and notify everyone.
+**Goal**: once Module 6 fills every seat, create one calendar event and
+notify everyone.
 
-**Depends on**: `get_valid_access_token` (use the **recruiter's or an
-organizer's** token to create the event, with the candidate + assigned
-interviewer + hiring manager as attendees), the Notification Service.
+**Depends on**: `get_valid_access_token` (recruiter's or an organizer's token
+to create the event), the Notification Service.
 
 **Build**:
 - Calendar API `events.insert` with `conferenceData: {createRequest: {...}}`
-  and `conferenceDataVersion=1` — this is how you get a real Google Meet link
-  out of the Calendar API; there's no separate "create a Meet link" call.
-- Store the returned event id on `Interview.calendar_event_id` and the Meet
-  link on `Interview.meeting_link`.
-- Send confirmation email to candidate + hiring manager + assigned
-  interviewer via the Notification Service, with a `.ics` attachment as a
-  fallback for anyone not on Google Calendar.
+  and `conferenceDataVersion=1` for the Meet link.
+- Attendees: candidate + hiring manager (if named) + **all N confirmed
+  interviewers**.
+- Store the event id on `Interview.calendar_event_id`, the Meet link on
+  `Interview.meeting_link`.
+- Send confirmation email to everyone via the Notification Service, `.ics`
+  attached as a fallback for non-Google participants.
 
 **Edge cases**: event creation succeeds but notification send fails (or vice
-versa) — don't leave a booking where the calendar event exists but nobody
-was told, or where people were told but no event exists; make these two
-steps individually retryable/idempotent if you can (e.g., check
-`calendar_event_id` is already set before creating a duplicate event on retry).
+versa) — don't leave a half-done booking; make both steps individually
+retryable/idempotent (check `calendar_event_id` is already set before
+creating a duplicate on retry).
 
 ---
 
 ## Module 8 — Post-Booking & Exception Handling
 
 **Goal**: reminders before the interview; both parties can cancel/reschedule,
-each with a distinct downstream effect.
+with per-seat granularity for interviewer cancellations.
 
-**Depends on**: Module 7's booking + calendar event, Module 6's cascade
-logic (reused here), a scheduled job runner (a simple polling loop or a
-library like APScheduler is enough for hackathon scope).
+**Depends on**: Module 7's booking + calendar event, Module 6's
+ranking/cascade logic (reused here, scoped to one seat), a scheduled job
+runner (a simple polling loop or APScheduler is enough for hackathon scope).
 
 **Build**:
 - A scheduled job finding bookings starting soon and sending reminders —
-  same job can also run Module 6's offer-expiry sweep.
-- `POST /interviews/{id}/cancel` (candidate) — release the assigned
-  interviewer (flip their `InterviewParticipant.status` to `cancelled`,
-  which automatically drops them from the live load-balancing count), notify
+  the same job can also run Module 6's offer-expiry sweep.
+- `POST /interviews/{id}/cancel` (candidate) — release **all** confirmed
+  interviewer seats (flip each `InterviewParticipant.status` to `cancelled`,
+  which drops them from the live load-balancing count automatically), notify
   them it's off, reset `Interview.status` back to `collecting_availability`.
 - `POST /interviews/{id}/reschedule` (candidate) — same release as cancel,
-  but expects new/updated availability windows and loops back to Module 3.
-- `POST /interviews/{id}/interviewer-cancel` (assigned interviewer, via a
-  signed link or authenticated session) — flip their `InterviewParticipant`
-  to `cancelled`, then **re-run Module 6's ranking/cascade for the same fixed
-  time**, excluding this interviewer. The candidate's confirmed time doesn't
-  move unless the pool's exhausted, which escalates exactly like Module 6's
-  exhausted-pool case.
+  expects new/updated availability windows, loops back to Module 3.
+- `POST /interviews/{id}/interviewer-cancel` (a confirmed interviewer, via a
+  signed link or authenticated session) — flip **only their own**
+  `InterviewParticipant` to `cancelled`, then re-run Module 6's
+  ranking/cascade for **that one seat**, at the same fixed time, excluding
+  this interviewer. The candidate's confirmed time and the other confirmed
+  interviewers are untouched unless the pool's exhausted for that seat,
+  which escalates exactly like Module 6's exhausted-pool case.
 
 **Edge cases**: a cancel/decline arriving after the interview's already
 happened (check `Interview.status`/`confirmed_start_utc` against now before
-acting — don't reschedule a completed interview). Both parties trying to
-cancel at nearly the same moment (whichever transaction commits first wins;
-the second should see the already-updated state and respond accordingly,
-not error out).
+acting). Two different confirmed interviewers cancelling their seats at
+nearly the same moment (each should independently trigger its own seat's
+cascade — verify one cancellation's cascade doesn't accidentally interfere
+with the other seat's state).
 
 ---
 
@@ -278,15 +290,9 @@ Internally, either:
 - Use an external provider (SendGrid/Resend) with its own API key in `.env`.
 
 **Decide and document which** in [ARCHITECTURE.md](ARCHITECTURE.md) — it
-changes whether email arrives from a real person's Gmail address (more
-trustworthy-looking, but ties sending to that person's token being valid) or
-a service address (more reliable, but is another API key to manage and
-another `.env` entry to add for the whole team).
+changes whether email arrives from a real person's Gmail address versus a
+service address, and whether it's another `.env` entry to manage.
 
 **Signed action links** (offer accept/decline, interviewer-initiated cancel):
-generalize the pattern already used for `InviteToken` —
-hash-and-store-only, single-use, expiring. Don't build a separate ad hoc
-token scheme per module; if it's worth adding a shared `ActionToken` table
-(token_hash, action_type, payload, expires_at, used_at) instead of one table
-per link type, raise that as a small refactor once two modules need the same
-shape, rather than deciding it upfront.
+generalize the pattern already used for `InviteToken` — hash-and-store-only,
+single-use, expiring. Don't build a separate ad hoc token scheme per module.
