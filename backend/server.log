@@ -1,0 +1,12 @@
+INFO:     Started server process [24968]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:52964 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51375 - "GET /auth/google/login HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:53728 - "GET /auth/google/callback?state=eyJub25jZSI6ImR2MDdtcWtwUDVMdXhpSS1WNTlJa1EifQ.ap0sRg.L-xuRTrybn6h9ajH8PpZ9geRjR0&iss=https://accounts.google.com&code=4/0ATsMZqDWPexDKBu29LPy27oGW6bx1qQmynx6R1FN9ryCiwX0pahBbXr40XB0H9NLZiQj8w&scope=email%20profile%20https://www.googleapis.com/auth/calendar%20https://www.googleapis.com/auth/gmail.send%20https://www.googleapis.com/auth/userinfo.profile%20https://www.googleapis.com/auth/userinfo.email%20openid&authuser=0&prompt=consent HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:57801 - "GET /auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56173 - "GET /auth/google/login HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:60430 - "GET /auth/google/login HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:51334 - "GET /auth/google/callback?state=eyJub25jZSI6ImxzeHJ1UkEzVWVSUklqWVFUemowREEifQ.ap0uQw.UL0NNDQInxj6w61mu9ypjFFsWYk&iss=https://accounts.google.com&code=4/0ATsMZqBOfXfoRt37I586saFuH3NxRgkiWcX2is_o7PjQOrP7vegIivlzpMOW9z-0lK_qVw&scope=email%20profile%20https://www.googleapis.com/auth/userinfo.profile%20https://www.googleapis.com/auth/userinfo.email%20openid%20https://www.googleapis.com/auth/calendar%20https://www.googleapis.com/auth/gmail.send&authuser=1&prompt=consent HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:58891 - "GET /auth/me HTTP/1.1" 200 OK

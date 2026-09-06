@@ -1,0 +1,97 @@
++-------------------------------------------------------------+
+|                      1. Setup & Auth                         |
+|  - Everyone (recruiters/interviewers/candidates) logs in     |
+|    via Google OAuth (RBAC by role)                           |
+|  - Connect Google Calendar / Gmail permissions               |
++------------------------------+------------------------------+
+                               |
+                               v
++-------------------------------------------------------------+
+|              2. Create Interview Request                     |
+|  - Recruiter defines: Interview Type (e.g. TECHNICAL_ROUND_1)|
+|  - Required Skills (e.g. ["React", "System Design"])         |
+|  - Required Seniority (e.g. SENIOR)                           |
+|  - Duration, buffer time (e.g. 15m)                           |
+|  - Add candidate details (Email, Time zone)                  |
+|  - NOTE: no named panelist, no panelist count -- always       |
+|    exactly ONE interviewer, chosen automatically in step 6   |
+|  - (Optional) Hiring manager named explicitly, not pooled    |
++------------------------------+------------------------------+
+                               |
+                               v
++-------------------------------------------------------------+
+|         2B. Interviewer Pool Profile (parallel/ongoing)       |
+|  - Each interviewer declares: skills, seniority level,        |
+|    qualified interview types, active/inactive toggle         |
++------------------------------+------------------------------+
+                               |
+                               v
++-------------------------------------------------------------+
+|         3. Candidate Availability Collection                 |
+|  - Generate unique signed invitation link                    |
+|  - Candidate logs in via the link, submits free time windows |
+|    in their own time zone                                    |
++------------------------------+------------------------------+
+                               |
+                               v
++-------------------------------------------------------------+
+|         4. Interviewer Pool Feasibility Check                 |
+|  - Filter pool by skills + seniority + interview type + active|
+|  - Fetch Free/Busy via Calendar API for eligible interviewers |
+|  - Keep only candidate windows with >=1 eligible+free person  |
+|    (binary feasibility, not a ranked list -- ranking happens  |
+|    later, once a time is fixed)                               |
++------------------------------+------------------------------+
+                               |
+                               v
++-------------------------------------------------------------+
+|         5. Candidate Slot Selection                           |
+|  - Candidate views feasible slots in their local time zone    |
+|    and picks exactly one                                      |
++------------------------------+------------------------------+
+                               |
+                               v
++-------------------------------------------------------------+
+|      6. Interviewer Assignment & Cascade (sequential)          |
+|  - Rank eligible+free-at-that-time interviewers:               |
+|      1) lowest rolling 7-day confirmed interview count         |
+|         (burnout prevention / load balancing)                  |
+|      2) tie-break: least recently assigned (round-robin)       |
+|  - Lock + reserve the #1-ranked person, send them an           |
+|    accept/decline notification (signed link, no login needed)  |
+|      [Accepted]  ---> proceed to step 7                        |
+|      [Declined / no response before timeout] --->              |
+|            re-rank remaining pool, offer to next person,       |
+|            repeat until accepted or pool exhausted             |
+|      [Pool exhausted] ---> escalate to recruiter /              |
+|            ask candidate to re-pick a slot                     |
++------------------------------+------------------------------+
+                               |
+                               v
++-------------------------------------------------------------+
+|            7. Event Creation & Dispatch                       |
+|  - Generate Google Meet link via Calendar API                 |
+|    (conferenceData on the same events.insert call)             |
+|  - Create calendar event for candidate + hiring manager        |
+|    (if any) + the one assigned interviewer                     |
+|  - Send confirmation emails with .ics calendar invites         |
++------------------------------+------------------------------+
+                               |
+                               v
++-------------------------------------------------------------+
+|            8. Post-Booking & Exception Handling                |
+|  - Scheduled job sends reminders before the interview          |
+|  - Candidate cancels/reschedules:                               |
+|       -> release assigned interviewer, notify them,            |
+|          restart from step 3 with new availability             |
+|  - Assigned interviewer cancels (after accepting):              |
+|       -> release just that one assignment, re-run step 6's     |
+|          ranking/cascade for the SAME fixed time, excluding    |
+|          them; candidate's confirmed time doesn't move unless  |
+|          the pool is exhausted (same escalation as step 6)     |
++-------------------------------------------------------------+
+
+See Documentation/WORKFLOW.md for the full explanation, the mermaid version
+of this diagram, the decisions behind each stage, and how each stage maps to
+the hackathon's minimum deliverables. This file is kept as a quick-glance
+reference; Documentation/WORKFLOW.md is the maintained source of truth.
