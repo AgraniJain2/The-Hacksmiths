@@ -161,22 +161,37 @@ class PanelAssignmentAgent:
             if seat.status != "pending":
                 continue
             exclude = self._held_ids(seats) | set(seat.declined_interviewer_ids)
-            picked = self._pick_next(
-                ranked=ranked, exclude=exclude, res_start=res_start, res_end=res_end
-            )
-            if picked is None:
-                seat.status = "exhausted"
-                seat.responded_at = as_of
-                continue
-            self.reservations.reserve(
-                picked, interview.interview_id, seat.seat_index, res_start, res_end
-            )
-            seat.interviewer_id = picked
-            seat.status = "offered"
-            seat.offered_at = as_of
-            seat.offer_expires_at = as_of + timeout
-            seat.responded_at = None
-            self.notifier.send_seat_offer(interview, seat)
+            # Loop, not a single pick-then-reserve: `_pick_next`'s `is_free()`
+            # check and this seat's actual `reserve()` call are two separate
+            # steps, so a *different* interview's concurrent reserve() for
+            # the same person can land in between them (this is exactly the
+            # race ARCHITECTURE.md calls out - a real DB-backed
+            # ReservationLedger makes it reachable under real concurrent
+            # load, see Documentation/IMPLEMENTATION_PLAN.md Phase 6).
+            # Losing that race must cascade to the next-ranked candidate,
+            # not crash this seat's whole assignment.
+            while True:
+                picked = self._pick_next(
+                    ranked=ranked, exclude=exclude, res_start=res_start, res_end=res_end
+                )
+                if picked is None:
+                    seat.status = "exhausted"
+                    seat.responded_at = as_of
+                    break
+                try:
+                    self.reservations.reserve(
+                        picked, interview.interview_id, seat.seat_index, res_start, res_end
+                    )
+                except ValueError:
+                    exclude = exclude | {picked}
+                    continue
+                seat.interviewer_id = picked
+                seat.status = "offered"
+                seat.offered_at = as_of
+                seat.offer_expires_at = as_of + timeout
+                seat.responded_at = None
+                self.notifier.send_seat_offer(interview, seat)
+                break
 
         interview = interview.model_copy(update={"seats": seats, "updated_at": as_of})
         return self._resolve(interview, request, as_of)

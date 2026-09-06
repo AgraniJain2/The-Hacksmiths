@@ -6,19 +6,44 @@ import Spinner from "../components/Spinner";
 import { IconAlert, IconCalendar, IconCheck } from "../components/icons";
 import styles from "./RequestDetail.module.css";
 
+const CANCELLABLE_STATUSES = new Set([
+  "collecting_availability",
+  "awaiting_candidate_selection",
+  "assigning_panel",
+  "panel_complete",
+  "manual_scheduling_required",
+]);
+
 export default function RequestDetail() {
   const { requestId } = useParams();
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  function load() {
     api
       .getRequest(requestId)
       .then(setDetail)
       .catch((err) => setError(err.message || "Couldn't load this request."));
-  }, [requestId]);
+  }
 
-  if (error) return <p className="field-error">{error}</p>;
+  useEffect(load, [requestId]);
+
+  async function cancel() {
+    if (!window.confirm("Cancel this interview request? This can't be undone.")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.cancelRequest(requestId);
+      load();
+    } catch (err) {
+      setError(err.message || "Couldn't cancel this request.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error && !detail) return <p className="field-error">{error}</p>;
   if (!detail) return <Spinner label="Loading…" />;
 
   const { request, round, feasibility, interview } = detail;
@@ -35,10 +60,19 @@ export default function RequestDetail() {
             <span className="pill pill-neutral font-mono">{request.request_id}</span>
           </div>
         </div>
-        <Link to="/requests" className="btn btn-ghost btn-sm">
-          Back to all requests
-        </Link>
+        <div className={styles.headerActions}>
+          {CANCELLABLE_STATUSES.has(request.status) && (
+            <button className="btn btn-outline btn-sm" onClick={cancel} disabled={busy}>
+              Cancel request
+            </button>
+          )}
+          <Link to="/requests" className="btn btn-ghost btn-sm">
+            Back to all requests
+          </Link>
+        </div>
       </div>
+
+      {error && <p className="field-error" style={{ marginBottom: "1.5rem" }}>{error}</p>}
 
       {feasibility?.reauth_required_interviewer_ids?.length > 0 && (
         <div className={styles.reauthNotice}>

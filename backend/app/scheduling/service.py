@@ -324,6 +324,14 @@ class SchedulingService:
         Every other primitive (pool resolution, live feasibility, the state
         machine) is the exact same call `pipeline.assign_panel` makes."""
         row = self._get_row(request_id)
+        # MODULE_GUIDE.md Module 5 edge case: a double-submit (double-click,
+        # a retried request) must not trigger a second assignment run - check
+        # the current status first rather than silently re-running
+        # `create_interview` over an already-booked (or already-failed) row.
+        if row.status != "awaiting_candidate_selection":
+            raise ValueError(
+                f"request {request_id} is {row.status!r}, not awaiting a slot selection"
+            )
         request = _row_to_request(row)
         round_ = _row_to_round(row)
         feasibility = self.get_feasibility(request_id)
@@ -486,6 +494,11 @@ class SchedulingService:
                 _persist_interview(row, cancelled, _row_to_request(row))
             row.status = "cancelled"
             row.updated_at = datetime.now(UTC)
+            # Cleared here (not just left pointing at a real event that's
+            # about to be deleted below) so a cancelled interview's detail
+            # page never renders a stale Meet link.
+            row.calendar_event_id = None
+            row.meeting_link = None
             self.db.commit()
         except Exception:
             self.db.rollback()

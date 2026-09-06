@@ -22,14 +22,17 @@ own tests), the full HTTP surface in `scheduling/router.py`, and every
 frontend page — all now backed by **real DB persistence** (`scheduling/service.py`
 + `app/db/models.py`, Phase 2), **real email** (Resend, Phase 1), **real
 Google Calendar availability checks** (`GoogleCalendarProvider`, Phase 3),
-and **real Calendar event creation with a working Meet link**
-(`event_dispatch.py`, Phase 4) — every one of these verified against real
+**real Calendar event creation with a working Meet link**
+(`event_dispatch.py`, Phase 4), and **real scheduled jobs + cancel/reschedule
+that actually touch that event** (`jobs.py` + `event_dispatch.py`'s
+cancel/patch functions, Phase 5) — every one of these verified against real
 connected Google accounts, not just fixtures, each phase catching (and
-fixing) a genuine bug that fixture-only testing hadn't. **Phases 0 through 4
-are done** (see their sections for exactly what shipped); Phase 5 onward is
-still ahead. The full happy path — request → availability → feasibility →
-slot pick → panel assignment → a real Calendar event with a real Meet link
-— works end to end today.
+fixing) a genuine bug that fixture-only testing hadn't. **Phases 0 through 5
+are done** (see their sections for exactly what shipped); Phase 6 (hardening/
+demo readiness) is the only phase left. The full 8-stage workflow — request →
+availability → feasibility → slot pick → panel assignment → a real Calendar
+event with a real Meet link → cancel/reschedule that actually undoes it —
+works end to end today, for real, not just in the demo store.
 
 **Revision note (this version):** Phase 0 (UI/UX + messaging fixes) and
 Phase 1 (email via Resend) are new, added from direct product feedback.
@@ -545,9 +548,57 @@ confirmation email received with `.ics` attached.
 
 ---
 
-## Phase 5 — Module 8: Scheduled Jobs + Cancel/Reschedule Against the Real Calendar
+## Phase 5 — Module 8: Scheduled Jobs + Cancel/Reschedule Against the Real Calendar ✅ done
 
-**Goal:** the parts of Stage 8 that need a clock (reminders, offer-expiry
+**Shipped:** `app/scheduling/jobs.py` - an `APScheduler` `BackgroundScheduler`
+started from `app/main.py`'s startup event, running `SchedulingService.sweep_expired_offers`
+every 5 minutes (finds any `offered` seat past its `offer_expires_at` via each
+interview's own `seats_json`, cascades it exactly like an explicit decline -
+reuses `assignment.py`'s already-tested `process_timeouts`, no new engine
+logic) and `.sweep_reminders` every 30 minutes (sends a reminder once per
+confirmed interview starting within 24h, tracked via a new
+`Interview.reminder_sent_at` column). `event_dispatch.py` gained three real
+Calendar-touching functions: `cancel_event` (candidate cancel/reschedule -
+deletes the real event, emails a cancellation notice with a `CANCEL`-method
+`.ics`), `remove_attendee_from_event` (a single interviewer's own cancel -
+patches just them out of the existing event immediately), and
+`dispatch_confirmed_booking` itself grew a second path - if the event
+already exists (a replacement was just found for a re-opened seat), it now
+patches the attendee list to the current roster instead of skipping, so a
+cascade's eventual replacement actually gets added to the calendar invite.
+New `POST /requests/{request_id}/reschedule` endpoint (candidate-only,
+accepts new windows and loops straight back to Module 3/4 in one call); the
+existing `/cancel` endpoint now also accepts staff (any recruiter/hiring_manager),
+not just the owning candidate. A `_reject_if_past` guard blocks
+cancel/reschedule/interviewer-cancel once `confirmed_start_utc` has passed.
+
+**Two real bugs found by the tests, not by inspection** (both now fixed,
+with regression tests locking them in): (1) `candidate_reschedule` cleared
+`row.calendar_event_id` *before* calling the cancellation step, so
+`cancel_event`'s own guard read the already-blanked field and silently
+skipped deleting the real event — fixed by having `cancel_event` read the
+event id off the caller's pre-cancellation `Interview` snapshot instead of
+the live row. (2) A test wrongly assumed `interviewer_cancel`'s cascade
+auto-completes the panel; the engine only *re-offers* a seat, it never
+auto-accepts — the test's expectation was the bug, not the code, but it
+surfaced a genuine second scenario (`dispatch_confirmed_booking` syncing a
+*replacement* onto an already-existing event once they separately accept)
+that's now its own passing test.
+
+**Manual verification, done for real:** booked a real interview against
+`shamvrueth@gmail.com` again (same account as Phase 3/4), producing a real
+Calendar event; then called `candidate_cancel` for real and fetched the
+event back via `events().get()` - Google returned `status: "cancelled"`,
+confirming the real deletion actually happened, not just a DB-side flag.
+The interviewer-side `events.patch` (attendee sync/removal) is covered by
+five passing tests against a fake transport but wasn't re-verified against
+a real account in this phase - insert/get/delete were already proven real
+in Phases 3-4 against the same API family, so this is a smaller, explicitly
+acknowledged gap rather than an oversight.
+
+101/101 backend tests pass (`cd backend && pytest`), stable across 5 runs.
+
+**Goal (context for the above):** the parts of Stage 8 that need a clock (reminders, offer-expiry
 cascade) and the parts that need to undo a real booking (cancel/reschedule)
 both work without a human watching.
 
@@ -589,18 +640,28 @@ Calendar event is actually gone/updated for every real attendee.
 try, and the docs stop lying about what's built.
 
 - Concurrency: validate the Phase 2 row-lock under real parallel load (two
-  interviews' cascades independently targeting the same top-ranked person),
-  and confirm the "what breaks first" story in ARCHITECTURE.md still holds.
-  Postgres switch is a config change (`DATABASE_URL`), not new code — verify
-  it actually works, don't just assert it.
+  interviews' cascades independently targeting the same top-ranked person) —
+  done with real `threading.Thread`/`threading.Barrier` stress tests against
+  file-based SQLite (`tests/scheduling_service/test_concurrent_bookings.py`),
+  which found and fixed a real crash (see below). Postgres switch is still a
+  config change only (`DATABASE_URL`), not new code, but a *live* Postgres
+  container run was not completed this phase — this dev environment couldn't
+  get Docker Desktop running. Not a blocker for the prototype (SQLite is the
+  shipped/verified persistence layer here); treat "run a real Postgres and
+  `alembic upgrade head` against it" as a follow-up whenever Docker is
+  available, not a gap in this delivery.
 - CONVENTIONS.md pass over every endpoint added since Phase 2: empty/missing
   fields, double-submit idempotency, RBAC on each new route, no secret ever
   logged (including `RESEND_API_KEY`).
-- Update the stale docs: `Documentation/README.md`'s status table (currently
-  shows everything past auth as 🔲, which stopped being true several commits
-  ago), `DATA_MODEL.md`'s "Status" note once the tables are real,
-  `ARCHITECTURE.md`'s notification-service line (now decided: Resend, see
-  Phase 1).
+- Docs already kept current phase-by-phase (`README.md`'s status table and
+  `DATA_MODEL.md`'s status note were updated as each phase landed, not saved
+  up for this one) - what's actually still stale: `ARCHITECTURE.md`'s
+  notification-service line (still describes the old Gmail-vs-external-provider
+  question as open; it's decided - Resend, Phase 1) and its System diagram
+  (still shows a generic "Feature APIs" box, not the real
+  `service.py`/`event_dispatch.py`/`jobs.py` split); `AUTH_MODULE.md`/
+  `MODULE_GUIDE.md` still call `Interview` a "stub" in a couple of places.
+  Sweep for any other doc still describing something Phases 0-5 replaced.
 - A seed script (`backend/scripts/seed_demo.py`) creating a small
   interviewer pool + one ready-to-walk-through interview request, so a live
   demo doesn't start from an empty DB.
@@ -614,6 +675,33 @@ try, and the docs stop lying about what's built.
 script, and a click-through of all 8 stages — including a forced decline
 cascade and a cancellation — works without touching a debugger, and every
 doc in `Documentation/` matches what's actually in the code.
+
+**Shipped:** Fixed a real crash the new concurrency test caught —
+`fill_pending_seats` did a single-shot "pick then reserve," so losing a
+reservation race raised an uncaught `ValueError` instead of cascading to the
+next-ranked candidate; now a retry loop (`assignment.py`). Hardened the HTTP
+boundary with `Literal` types for `interview_type`/`seniority`/
+`interview_types` so a garbage value is rejected with a 422 before it ever
+reaches the DB, instead of committing then crashing on read-back
+(`schemas.py`); added a working-hours-not-inverted validator. Added a
+double-submit guard on `select_slot` (`service.py`). Widened
+`state_machine.py`'s allowed transitions so a candidate can cancel out of
+`manual_scheduling_required` (previously an unhandled crash, reached via a
+mid-cascade escalation) and widened `router.py`'s `_wrap()` so a
+`SeatError`/`InvalidTransitionError`/`BookingConflictError` from the engine
+returns a clean 400 instead of a 500. Fixed a reschedule bug in
+`event_dispatch.cancel_event` (was reading the already-cleared
+`row.calendar_event_id` instead of the pre-cancellation snapshot, so a
+reschedule's calendar-delete silently no-opped). Added
+`backend/scripts/seed_demo.py` for repeatable demo state from real
+logged-in accounts. Fixed stale doc references (Gmail → Resend, "Interview
+stub" wording, `ARCHITECTURE.md` system diagram). Ran the `security-review`
+skill over the full diff — no findings above the confidence bar (existing
+RBAC checks on cancel/reschedule routes are unchanged by this phase; no new
+injection, auth-bypass, or secret-handling issue introduced). Full backend
+regression suite green. Live Postgres verification not completed this phase
+(Docker unavailable in this dev environment) — flagged above as a follow-up,
+not a delivery gap.
 
 ---
 

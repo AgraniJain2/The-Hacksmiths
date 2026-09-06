@@ -8,8 +8,9 @@
 | ORM / migrations | SQLAlchemy + Alembic | Explicit schema, reviewable migrations — important with several people extending the same tables (`Interview` especially). |
 | Database (dev) | SQLite (`backend/dev.db`) | Zero setup — anyone can clone and run without installing a DB server. |
 | Database (prod / scale demo) | PostgreSQL | Needed the moment any feature relies on row-level locking (`SELECT ... FOR UPDATE` when creating an interviewer offer — see [WORKFLOW.md](WORKFLOW.md#6-n-seat-interviewer-assignment)) or handles concurrent writers. SQLite's locking is coarser (whole-file), which is fine for a single-dev happy-path demo but not for proving the race-condition guard actually works. |
-| Auth | Google OAuth 2.0 (Authorization Code + offline access) | We need standing access to Calendar/Gmail on the user's behalf *after* they've left the browser (background scheduling, reminders) — that requires a refresh token, which only the offline-access OAuth flow provides. See [AUTH_MODULE.md](AUTH_MODULE.md). |
-| External APIs | Google Calendar API, Gmail API | Free/busy checks, event creation with Meet conferencing, and sending notifications, all through the same Google identity a user already has. |
+| Auth | Google OAuth 2.0 (Authorization Code + offline access) | We need standing access to Calendar on the user's behalf *after* they've left the browser (background scheduling, reminders) — that requires a refresh token, which only the offline-access OAuth flow provides. See [AUTH_MODULE.md](AUTH_MODULE.md). |
+| External APIs | Google Calendar API | Free/busy checks (`GoogleCalendarProvider`) and real event creation with Meet conferencing (`app/scheduling/event_dispatch.py`), through the Google identity each interviewer/recruiter already has. |
+| Email | Resend | **Decided** (Documentation/IMPLEMENTATION_PLAN.md Phase 1) — every notification (invite, offer, confirmation + `.ics`, cancellation, reminder) goes through `app/notifications/service.py`'s `send_email`, a plain Resend API call, not Gmail. Chosen over routing through a user's own Gmail (the option this row used to leave open) because it needs no per-user Gmail scope round-trip and works identically for every role, at the cost of email arriving from a service address rather than a real person's Gmail. `gmail.send` is still requested at login (see `GOOGLE_SCOPES`) but nothing in the codebase calls it — a harmless, known loose end from before this was decided, not a currently-used code path. |
 | Frontend | React 18 + Vite (plain JS/JSX, no TypeScript), React Router v6, CSS Modules + a shared design-token stylesheet (no Tailwind/component library) | Small, fixed page count so far didn't justify a heavier toolchain; see [FRONTEND_DESIGN_SYSTEM.md](FRONTEND_DESIGN_SYSTEM.md) for the full reasoning and the tokens/components every new page should build on. |
 
 ## System diagram
@@ -22,31 +23,43 @@ flowchart LR
 
     subgraph Backend["FastAPI backend (backend/app)"]
         AUTH["auth module\n(login/callback/session)"]
-        API["Feature APIs\n(interviews, slots, bookings)"]
-        SCHED["Scheduling logic\n(availability + slot ranking)"]
+        ROUTER["scheduling/router.py\n(RBAC + HTTP shapes)"]
+        SVC["scheduling/service.py\n(SchedulingService - DB persistence,\nwraps the pure engine)"]
+        ENGINE["scheduling/{pipeline,assignment,\nfeasibility,state_machine}.py\n(pure engine, no I/O)"]
+        DISPATCH["scheduling/event_dispatch.py\n(Meet event create/patch/cancel + .ics)"]
+        JOBS["scheduling/jobs.py\n(APScheduler - reminders,\noffer-expiry sweep)"]
+        NOTIFY["notifications/service.py\n(send_email)"]
     end
 
-    DB[("Postgres / SQLite\nUsers, OAuthTokens,\nInterviews, Bookings")]
+    DB[("Postgres / SQLite\nUsers, OAuthTokens,\nInterviews, InterviewerProfiles,\nSlotOffers, Participants")]
 
     subgraph Google["Google APIs"]
         GOAUTH["OAuth 2.0"]
         GCAL["Calendar API\n(freebusy, events)"]
-        GMAIL["Gmail API\n(send)"]
     end
 
-    FE -- session cookie --> API
+    RESEND[("Resend\n(transactional email)")]
+
+    FE -- session cookie --> ROUTER
     FE -- redirect --> AUTH
     AUTH -- code exchange --> GOAUTH
     AUTH --> DB
-    API --> SCHED
-    SCHED -- "get_valid_access_token()" --> AUTH
-    SCHED --> GCAL
-    API --> GMAIL
-    API --> DB
+    ROUTER --> SVC
+    SVC --> ENGINE
+    SVC --> DISPATCH
+    JOBS --> SVC
+    SVC -- "get_valid_access_token()" --> AUTH
+    DISPATCH -- "get_valid_access_token()" --> AUTH
+    SVC --> GCAL
+    DISPATCH --> GCAL
+    SVC --> NOTIFY
+    DISPATCH --> NOTIFY
+    NOTIFY --> RESEND
+    SVC --> DB
 ```
 
 The key architectural rule: **feature modules never talk to Google or hold
-tokens directly.** Every Calendar/Gmail call goes through
+tokens directly.** Every Calendar call goes through
 `google_oauth.get_valid_access_token(db, user_id)` in the auth module, which
 handles refreshing an expiring token and raises a typed `ReauthRequired`
 exception if the connection is dead. This keeps token lifecycle logic in one

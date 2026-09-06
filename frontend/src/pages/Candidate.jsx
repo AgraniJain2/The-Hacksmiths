@@ -17,6 +17,8 @@ export default function Candidate() {
   const [error, setError] = useState(null);
   const [windows, setWindows] = useState([emptyWindow()]);
   const [busy, setBusy] = useState(false);
+  const [rescheduling, setRescheduling] = useState(false);
+  const [rescheduleWindows, setRescheduleWindows] = useState([emptyWindow()]);
 
   function load() {
     api
@@ -74,6 +76,34 @@ export default function Candidate() {
       load();
     } catch (err) {
       setError(err.message || "Couldn't cancel.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function setRescheduleWindow(i, key, value) {
+    setRescheduleWindows((ws) => ws.map((w, idx) => (idx === i ? { ...w, [key]: value } : w)));
+  }
+
+  async function submitReschedule(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const payload = rescheduleWindows
+        .filter((w) => w.start && w.end)
+        .map((w) => ({
+          start: new Date(w.start).toISOString(),
+          end: new Date(w.end).toISOString(),
+          source_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }));
+      if (payload.length === 0) throw new Error("Add at least one time window.");
+      await api.rescheduleRequest(detail.request.request_id, payload);
+      setRescheduling(false);
+      setRescheduleWindows([emptyWindow()]);
+      load();
+    } catch (err) {
+      setError(err.message || "Couldn't reschedule.");
     } finally {
       setBusy(false);
     }
@@ -216,10 +246,68 @@ export default function Candidate() {
               </p>
             )
           )}
-          <button className="btn btn-outline" style={{ marginTop: "1rem" }} onClick={cancel} disabled={busy}>
-            Cancel interview
-          </button>
+          <div style={{ display: "flex", gap: "0.5rem", justifyContent: "center", marginTop: "1rem" }}>
+            <button
+              className="btn btn-outline"
+              onClick={() => setRescheduling((v) => !v)}
+              disabled={busy}
+            >
+              {rescheduling ? "Never mind" : "Reschedule"}
+            </button>
+            <button className="btn btn-outline" onClick={cancel} disabled={busy}>
+              Cancel interview
+            </button>
+          </div>
         </div>
+      )}
+
+      {rescheduling && interview && (
+        <form className={`glass-card ${styles.card}`} style={{ marginTop: "1.5rem" }} onSubmit={submitReschedule}>
+          <p className="text-secondary" style={{ marginBottom: "1.25rem" }}>
+            This releases your current time and every confirmed interviewer's seat — add the
+            windows that work for you now, and we'll find a new panel.
+          </p>
+          {rescheduleWindows.map((w, i) => (
+            <div key={i} className={styles.windowRow}>
+              <input
+                type="datetime-local"
+                className="input"
+                required
+                value={w.start}
+                onChange={(e) => setRescheduleWindow(i, "start", e.target.value)}
+              />
+              <span className="text-muted">to</span>
+              <input
+                type="datetime-local"
+                className="input"
+                required
+                value={w.end}
+                onChange={(e) => setRescheduleWindow(i, "end", e.target.value)}
+              />
+              {rescheduleWindows.length > 1 && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setRescheduleWindows((ws) => ws.filter((_, idx) => idx !== i))}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
+          <div className={styles.addRow}>
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              onClick={() => setRescheduleWindows((ws) => [...ws, emptyWindow()])}
+            >
+              + Add another window
+            </button>
+          </div>
+          <button className="btn btn-primary" type="submit" disabled={busy}>
+            {busy ? "Submitting…" : "Confirm reschedule"}
+          </button>
+        </form>
       )}
 
       {interview && request.status === "panel_complete" && (

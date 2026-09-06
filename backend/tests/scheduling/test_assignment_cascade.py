@@ -10,6 +10,26 @@ from app.scheduling.state_machine import InterviewStateMachine
 from app.scheduling.timeutils import buffered_interval
 
 
+class _RaceLosingLedger(ReservationLedger):
+    """Wraps a real ledger but makes the *first* `reserve()` attempt for one
+    specific interviewer raise, exactly as a real `DbReservationLedger` would
+    if a *different*, concurrent interview's reserve() call landed between
+    this seat's own `is_free()` pre-check and its `reserve()` call (Phase 6 -
+    Documentation/IMPLEMENTATION_PLAN.md). Everyone else, and this same
+    interviewer on any later attempt, behaves normally."""
+
+    def __init__(self, loses_race_for: str) -> None:
+        super().__init__()
+        self._loses_race_for = loses_race_for
+        self._raised_once = False
+
+    def reserve(self, interviewer_id, interview_id, seat_index, start, end):
+        if interviewer_id == self._loses_race_for and not self._raised_once:
+            self._raised_once = True
+            raise ValueError(f"simulated concurrent reservation for {interviewer_id}")
+        super().reserve(interviewer_id, interview_id, seat_index, start, end)
+
+
 def _setup(scn, config=None):
     config = config or SchedulingConfig()
     reservations = ReservationLedger()
@@ -115,3 +135,44 @@ def test_offer_timeout_cascades_to_next_ranked(interviewer_cancel_refill):
         r.kind == "seat_released" and "did not respond" in (r.reason or "")
         for r in scn.notifier.records
     )
+
+
+def test_losing_the_reservation_race_cascades_to_the_next_candidate_not_a_crash(normal_single):
+    """Phase 6: a real concurrency stress test (tests/scheduling_service/
+    test_concurrent_bookings.py) found that fill_pending_seats used to let
+    ReservationLedger.reserve()'s ValueError propagate straight out of the
+    whole assignment call instead of falling back to the next-ranked
+    candidate - crashing the request instead of just losing the race
+    gracefully. This reproduces the exact race deterministically, without
+    needing real threads."""
+    scn = normal_single
+    config = SchedulingConfig()
+    feas = find_feasible_slots(
+        scn.request, scn.round_,
+        interviewer_repo=scn.interviewer_repo, availability_repo=scn.availability_repo,
+        calendar=scn.calendar, notifier=scn.notifier, config=config, now=scn.now,
+    )
+    # normal_single's earliest slot only has iv-ben free (iv-ana is busy until
+    # 11:00 that day - see fixtures.py) - find a later slot where both are
+    # feasible, so there's an actual second-ranked candidate to cascade to.
+    chosen = next(s for s in feas.feasibility.feasible_slots if set(s.feasible_interviewer_ids) == {"iv-ana", "iv-ben"})
+
+    # iv-ben is the lowest-load pick (would normally win seat 0) - force
+    # *their* first reserve() to simulate losing a concurrent race.
+    # (assign_panel builds its own PanelAssignmentAgent/InterviewStateMachine
+    # internally from the `reservations=` ledger passed in below.)
+    ledger = _RaceLosingLedger(loses_race_for="iv-ben")
+
+    panel = assign_panel(
+        feas.request, scn.round_, feas.feasibility, chosen.slot_id,
+        interviewer_repo=scn.interviewer_repo, calendar=scn.calendar,
+        load_provider=scn.load_provider, notifier=scn.notifier,
+        reservations=ledger, config=config, now=scn.now,
+    )
+
+    # Must not raise, and must have cascaded to the *other* feasible
+    # candidate rather than leaving the seat unfilled or crashing.
+    assert panel.status == "assigning_panel"
+    seat = panel.interview.seats[0]
+    assert seat.status == "offered"
+    assert seat.interviewer_id == "iv-ana"

@@ -1,5 +1,14 @@
 # Module Guide — Pick One, Hand This to Your AI Agent
 
+**Status:** every module below (2 through 8) is now built — see
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for what actually shipped
+and where. This doc is kept as the original build brief / design record (the
+goals, edge cases, and "which function to call" pointers below are still
+accurate reference material), not as a "still to do" list — a mention of the
+`Interview` "stub" below is historical (true before Module 2 was built, not
+now: `app/scheduling/service.py` owns the real table DATA_MODEL.md
+describes).
+
 Each section below is written to be handed to an AI coding agent as the brief
 for that module — goal, what already exists to build on, what to build, and
 exactly which existing function to call for auth/Google access. Cross-read

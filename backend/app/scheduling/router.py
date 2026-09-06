@@ -31,8 +31,10 @@ from app.db.session import get_db
 from app.notifications.service import EmailSendError, send_email
 
 from . import schemas
+from .assignment import SeatError
 from .models import AvailabilityWindow
 from .service import ForbiddenError, NotFoundError, SchedulingService
+from .state_machine import BookingConflictError, InvalidTransitionError
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +44,21 @@ STAFF_ROLES = ("recruiter", "hiring_manager")
 
 
 def _wrap(fn, *args, **kwargs):
-    """Translate the service's plain exceptions into the right HTTP status."""
+    """Translate the service's/engine's plain exceptions into the right HTTP
+    status - CONVENTIONS.md's "prefer specific, typed errors over generic
+    500s" rule. `SeatError`/`InvalidTransitionError`/`BookingConflictError`
+    are the pure engine's own guards (e.g. cancelling a seat you don't hold,
+    an interview mid-transition) - each one means "this specific action
+    doesn't make sense right now," the same 400 semantic as a `ValueError`,
+    added here after Phase 6's hardening pass found at least one of these
+    reachable and previously an unhandled 500."""
     try:
         return fn(*args, **kwargs)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ForbiddenError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except ValueError as exc:
+    except (ValueError, SeatError, InvalidTransitionError, BookingConflictError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

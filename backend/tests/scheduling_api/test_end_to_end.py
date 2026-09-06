@@ -122,7 +122,7 @@ def test_full_happy_path_request_to_panel_complete():
         json={
             "skills": ["python"],
             "seniority": "SENIOR",
-            "interview_types": ["TECHNICAL_ROUND_1"],
+            "interview_types": ["TECHNICAL"],
             "timezone": "Asia/Kolkata",
             "working_hours_start": "09:00",
             "working_hours_end": "18:00",
@@ -262,7 +262,7 @@ def test_dead_google_connection_surfaces_over_the_api_not_a_500(monkeypatch):
     resp = client.put(
         "/scheduling/interviewer/profile",
         json={
-            "skills": ["python"], "seniority": "SENIOR", "interview_types": ["TECHNICAL_ROUND_1"],
+            "skills": ["python"], "seniority": "SENIOR", "interview_types": ["TECHNICAL"],
             "timezone": "UTC", "working_hours_start": "00:00", "working_hours_end": "23:59",
             "active": True,
         },
@@ -345,7 +345,7 @@ def test_panel_complete_creates_a_real_calendar_event_over_the_api(monkeypatch):
     client.put(
         "/scheduling/interviewer/profile",
         json={
-            "skills": ["python"], "seniority": "SENIOR", "interview_types": ["TECHNICAL_ROUND_1"],
+            "skills": ["python"], "seniority": "SENIOR", "interview_types": ["TECHNICAL"],
             "timezone": "UTC", "working_hours_start": "00:00", "working_hours_end": "23:59", "active": True,
         },
     )
@@ -374,3 +374,323 @@ def test_panel_complete_creates_a_real_calendar_event_over_the_api(monkeypatch):
     as_(RECRUITER)
     resp = client.get(f"/scheduling/requests/{request_id}")
     assert resp.json()["interview"]["calendar_event_id"] == "gcal-event-xyz"
+
+
+def test_staff_can_cancel_and_it_deletes_the_real_calendar_event(monkeypatch):
+    """Phase 5 (Module 8): a recruiter (not just the candidate) can cancel a
+    booked interview over the API, and doing so actually deletes the real
+    Calendar event, not just the DB row."""
+    import app.scheduling.event_dispatch as dispatch_module
+    from app.core.security import encrypt_token
+    from app.db.models import OAuthToken
+
+    seed_db = _TestSession()
+    seed_db.add(
+        OAuthToken(
+            user_id=RECRUITER.id,
+            access_token_enc=encrypt_token("fake-token"),
+            refresh_token_enc=encrypt_token("fake-refresh"),
+            scope="https://www.googleapis.com/auth/calendar",
+            expiry_utc=datetime(2100, 1, 1),
+        )
+    )
+    seed_db.commit()
+    seed_db.close()
+
+    delete_calls = []
+
+    class _FakeEvents:
+        def insert(self, calendarId, body, conferenceDataVersion, sendUpdates):
+            return self
+
+        def delete(self, calendarId, eventId, sendUpdates):
+            delete_calls.append(eventId)
+            return self
+
+        def execute(self):
+            return {
+                "id": "gcal-event-cancel-me",
+                "conferenceData": {"entryPoints": [{"entryPointType": "video", "uri": "https://meet.google.com/x"}]},
+            }
+
+    class _FakeCalendarService:
+        def events(self):
+            return _FakeEvents()
+
+    monkeypatch.setattr(dispatch_module, "build", lambda *a, **k: _FakeCalendarService())
+    monkeypatch.setattr(dispatch_module, "send_email", lambda *a, **k: None)
+
+    as_(RECRUITER)
+    resp = client.post(
+        "/scheduling/requests",
+        json={
+            "interview_type": "TECHNICAL_ROUND_1", "required_skills": ["python"], "seniority": "MID",
+            "panelists_required": 1, "candidate_name": "Cara Cancel",
+            "candidate_email": "cara-cancel@example.com", "candidate_timezone": "UTC",
+        },
+    )
+    request_id = resp.json()["request"]["request_id"]
+
+    as_(INTERVIEWER)
+    client.put(
+        "/scheduling/interviewer/profile",
+        json={
+            "skills": ["python"], "seniority": "SENIOR", "interview_types": ["TECHNICAL"],
+            "timezone": "UTC", "working_hours_start": "00:00", "working_hours_end": "23:59", "active": True,
+        },
+    )
+
+    as_(FakeUser("user-cara-cancel", "cara-cancel@example.com", "Cara Cancel", "candidate"))
+    resp = client.post(
+        f"/scheduling/requests/{request_id}/availability",
+        json={"windows": [{"start": "2026-09-10T04:00:00Z", "end": "2026-09-10T11:00:00Z"}]},
+    )
+    slot_id = resp.json()["feasibility"]["feasible_slots"][0]["slot_id"]
+    resp = client.post(f"/scheduling/requests/{request_id}/select-slot", json={"slot_id": slot_id})
+    interview_id = resp.json()["interview"]["interview_id"]
+
+    as_(INTERVIEWER)
+    client.post(f"/scheduling/interviews/{interview_id}/seats/0/respond", json={"accept": True})
+
+    # A candidate cannot cancel someone else's interview...
+    as_(FakeUser("user-other-2", "other2@example.com", "Other", "candidate"))
+    assert client.post(f"/scheduling/requests/{request_id}/cancel").status_code == 403
+
+    # ...but the recruiter who owns it can.
+    as_(RECRUITER)
+    resp = client.post(f"/scheduling/requests/{request_id}/cancel")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["request"]["status"] == "cancelled"
+    assert delete_calls == ["gcal-event-cancel-me"]
+
+
+def test_cancelling_an_interview_that_already_happened_is_rejected(monkeypatch):
+    """Phase 5's guard: MODULE_GUIDE.md's Module 8 edge case - a cancel
+    arriving after the interview's already happened must be rejected, not
+    silently processed."""
+    import app.scheduling.event_dispatch as dispatch_module
+
+    monkeypatch.setattr(dispatch_module, "build", lambda *a, **k: pytest.fail("should not reach Calendar"))
+    monkeypatch.setattr(dispatch_module, "send_email", lambda *a, **k: None)
+
+    as_(RECRUITER)
+    resp = client.post(
+        "/scheduling/requests",
+        json={
+            "interview_type": "TECHNICAL_ROUND_1", "required_skills": ["python"], "seniority": "MID",
+            "panelists_required": 1, "candidate_name": "Cara Past",
+            "candidate_email": "cara-past@example.com", "candidate_timezone": "UTC",
+        },
+    )
+    request_id = resp.json()["request"]["request_id"]
+
+    as_(INTERVIEWER)
+    client.put(
+        "/scheduling/interviewer/profile",
+        json={
+            "skills": ["python"], "seniority": "SENIOR", "interview_types": ["TECHNICAL"],
+            "timezone": "UTC", "working_hours_start": "00:00", "working_hours_end": "23:59", "active": True,
+        },
+    )
+
+    as_(FakeUser("user-cara-past", "cara-past@example.com", "Cara Past", "candidate"))
+    resp = client.post(
+        f"/scheduling/requests/{request_id}/availability",
+        json={"windows": [{"start": "2026-09-10T04:00:00Z", "end": "2026-09-10T11:00:00Z"}]},
+    )
+    slot_id = resp.json()["feasibility"]["feasible_slots"][0]["slot_id"]
+    client.post(f"/scheduling/requests/{request_id}/select-slot", json={"slot_id": slot_id})
+
+    # Force the confirmed time into the past, directly in the DB.
+    force_db = _TestSession()
+    row = force_db.query(db_models.Interview).filter_by(id=request_id).first()
+    row.confirmed_start_utc = datetime(2020, 1, 1)
+    force_db.commit()
+    force_db.close()
+
+    resp = client.post(f"/scheduling/requests/{request_id}/cancel")
+    assert resp.status_code == 400
+    assert "already happened" in resp.json()["detail"]
+
+
+def test_invalid_enum_values_are_rejected_with_422_not_a_500():
+    """Phase 6 (CONVENTIONS.md pass): a garbage seniority/interview_type used
+    to sail past validation, get committed to the DB, and only blow up as an
+    unhandled 500 the next time anything read the row back. Now rejected at
+    the request boundary instead."""
+    as_(RECRUITER)
+    resp = client.post(
+        "/scheduling/requests",
+        json={
+            "interview_type": "NOT_A_REAL_TYPE",
+            "required_skills": ["python"],
+            "seniority": "MID",
+            "panelists_required": 1,
+            "candidate_name": "Test",
+            "candidate_email": "test@example.com",
+            "candidate_timezone": "UTC",
+        },
+    )
+    assert resp.status_code == 422
+
+    resp = client.post(
+        "/scheduling/requests",
+        json={
+            "interview_type": "TECHNICAL_ROUND_1",
+            "required_skills": ["python"],
+            "seniority": "NOT_A_LEVEL",
+            "panelists_required": 1,
+            "candidate_name": "Test",
+            "candidate_email": "test@example.com",
+            "candidate_timezone": "UTC",
+        },
+    )
+    assert resp.status_code == 422
+
+    as_(INTERVIEWER)
+    resp = client.put(
+        "/scheduling/interviewer/profile",
+        json={
+            "skills": ["python"], "seniority": "SENIOR",
+            "interview_types": ["TECHNICAL_ROUND_1"],  # the old granular value - no longer accepted here
+            "timezone": "UTC", "working_hours_start": "09:00", "working_hours_end": "18:00", "active": True,
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_inverted_working_hours_are_rejected():
+    as_(INTERVIEWER)
+    resp = client.put(
+        "/scheduling/interviewer/profile",
+        json={
+            "skills": ["python"], "seniority": "SENIOR", "interview_types": ["TECHNICAL"],
+            "timezone": "UTC", "working_hours_start": "18:00", "working_hours_end": "09:00", "active": True,
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_double_submitting_select_slot_is_rejected_not_a_silent_double_run():
+    """Phase 6 / MODULE_GUIDE.md Module 5 edge case."""
+    as_(RECRUITER)
+    resp = client.post(
+        "/scheduling/requests",
+        json={
+            "interview_type": "TECHNICAL_ROUND_1", "required_skills": ["python"], "seniority": "MID",
+            "panelists_required": 1, "candidate_name": "Double Submitter",
+            "candidate_email": "double@example.com", "candidate_timezone": "UTC",
+        },
+    )
+    request_id = resp.json()["request"]["request_id"]
+
+    as_(INTERVIEWER)
+    client.put(
+        "/scheduling/interviewer/profile",
+        json={
+            "skills": ["python"], "seniority": "SENIOR", "interview_types": ["TECHNICAL"],
+            "timezone": "UTC", "working_hours_start": "00:00", "working_hours_end": "23:59", "active": True,
+        },
+    )
+
+    as_(FakeUser("user-double", "double@example.com", "Double Submitter", "candidate"))
+    resp = client.post(
+        f"/scheduling/requests/{request_id}/availability",
+        json={"windows": [{"start": "2026-09-10T04:00:00Z", "end": "2026-09-10T11:00:00Z"}]},
+    )
+    slot_id = resp.json()["feasibility"]["feasible_slots"][0]["slot_id"]
+
+    resp1 = client.post(f"/scheduling/requests/{request_id}/select-slot", json={"slot_id": slot_id})
+    assert resp1.status_code == 200, resp1.text
+
+    # Same click fired twice (double-click / a retried request).
+    resp2 = client.post(f"/scheduling/requests/{request_id}/select-slot", json={"slot_id": slot_id})
+    assert resp2.status_code == 400
+    assert "not awaiting a slot selection" in resp2.json()["detail"]
+
+
+def test_candidate_can_cancel_out_of_manual_scheduling_required(monkeypatch):
+    """Phase 6: found reachable and previously crashed with an unhandled
+    InvalidTransitionError - a candidate's request escalated to
+    manual_scheduling_required (seat pool exhausted) while a real Interview
+    row already existed, and cancelling from there is a legitimate action
+    ("never mind"), not something that needs a human to pick it up first."""
+    as_(RECRUITER)
+    resp = client.post(
+        "/scheduling/requests",
+        json={
+            "interview_type": "TECHNICAL_ROUND_1", "required_skills": ["python"], "seniority": "MID",
+            "panelists_required": 1, "candidate_name": "Cara Exhausted",
+            "candidate_email": "cara-exhausted@example.com", "candidate_timezone": "UTC",
+        },
+    )
+    request_id = resp.json()["request"]["request_id"]
+
+    as_(INTERVIEWER)
+    client.put(
+        "/scheduling/interviewer/profile",
+        json={
+            "skills": ["python"], "seniority": "SENIOR", "interview_types": ["TECHNICAL"],
+            "timezone": "UTC", "working_hours_start": "00:00", "working_hours_end": "23:59", "active": True,
+        },
+    )
+
+    as_(FakeUser("user-cara-exhausted", "cara-exhausted@example.com", "Cara Exhausted", "candidate"))
+    resp = client.post(
+        f"/scheduling/requests/{request_id}/availability",
+        json={"windows": [{"start": "2026-09-10T04:00:00Z", "end": "2026-09-10T11:00:00Z"}]},
+    )
+    slot_id = resp.json()["feasibility"]["feasible_slots"][0]["slot_id"]
+    resp = client.post(f"/scheduling/requests/{request_id}/select-slot", json={"slot_id": slot_id})
+    interview_id = resp.json()["interview"]["interview_id"]
+
+    # The only eligible interviewer declines - pool exhausted for this seat,
+    # nowhere to cascade to - escalates, with a real Interview row already
+    # in place.
+    as_(INTERVIEWER)
+    resp = client.post(f"/scheduling/interviews/{interview_id}/seats/0/respond", json={"accept": False})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["interview"]["status"] == "manual_scheduling_required"
+
+    as_(FakeUser("user-cara-exhausted", "cara-exhausted@example.com", "Cara Exhausted", "candidate"))
+    resp = client.post(f"/scheduling/requests/{request_id}/cancel")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["request"]["status"] == "cancelled"
+
+
+def test_interviewer_cancelling_a_seat_they_dont_hold_is_a_clean_400(monkeypatch):
+    """Phase 6: SeatError used to escape _wrap() uncaught."""
+    as_(RECRUITER)
+    resp = client.post(
+        "/scheduling/requests",
+        json={
+            "interview_type": "TECHNICAL_ROUND_1", "required_skills": ["python"], "seniority": "MID",
+            "panelists_required": 1, "candidate_name": "Cara NotHeld",
+            "candidate_email": "cara-notheld@example.com", "candidate_timezone": "UTC",
+        },
+    )
+    request_id = resp.json()["request"]["request_id"]
+
+    as_(INTERVIEWER)
+    client.put(
+        "/scheduling/interviewer/profile",
+        json={
+            "skills": ["python"], "seniority": "SENIOR", "interview_types": ["TECHNICAL"],
+            "timezone": "UTC", "working_hours_start": "00:00", "working_hours_end": "23:59", "active": True,
+        },
+    )
+
+    as_(FakeUser("user-cara-notheld", "cara-notheld@example.com", "Cara NotHeld", "candidate"))
+    resp = client.post(
+        f"/scheduling/requests/{request_id}/availability",
+        json={"windows": [{"start": "2026-09-10T04:00:00Z", "end": "2026-09-10T11:00:00Z"}]},
+    )
+    slot_id = resp.json()["feasibility"]["feasible_slots"][0]["slot_id"]
+    resp = client.post(f"/scheduling/requests/{request_id}/select-slot", json={"slot_id": slot_id})
+    interview_id = resp.json()["interview"]["interview_id"]
+
+    # Seat is only OFFERED, not yet accepted - INTERVIEWER doesn't hold a
+    # confirmed seat to cancel.
+    as_(INTERVIEWER)
+    resp = client.post(f"/scheduling/interviews/{interview_id}/interviewer-cancel")
+    assert resp.status_code == 400

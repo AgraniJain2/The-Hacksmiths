@@ -10,27 +10,40 @@ generating ids server-side, etc).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from .models import FeasibilityResult, Interview, InterviewRequest, Round
 
 INTERVIEW_TYPES = ["SCREENING", "TECHNICAL_ROUND_1", "TECHNICAL_ROUND_2", "MANAGERIAL", "HR"]
 
+# Phase 6 (CONVENTIONS.md pass): these used to be plain `str`, so a garbage
+# value sailed straight into the DB and only blew up as an unhandled 500 -
+# with the row already committed - the *next* time anything read it back
+# (`InterviewRequest`'s own Literal fields rejected it there, just too late).
+# Constraining it here instead means FastAPI now rejects it with a clean 422
+# before it ever touches the database. Two different literals, not one -
+# matches the split `lib/constants.js` already has: a request names one
+# specific round, an interviewer declares generic "TECHNICAL" (Phase 0.2,
+# `pool.py`'s `_type_ok`), never the round-specific values.
+RequestInterviewType = Literal["SCREENING", "TECHNICAL_ROUND_1", "TECHNICAL_ROUND_2", "MANAGERIAL", "HR"]
+InterviewerQualificationType = Literal["SCREENING", "TECHNICAL", "MANAGERIAL", "HR"]
+SeniorityLevel = Literal["JUNIOR", "MID", "SENIOR", "STAFF", "PRINCIPAL"]
+
 
 class CreateRequestBody(BaseModel):
-    interview_type: str
+    interview_type: RequestInterviewType
     required_skills: List[str] = Field(min_length=1)
-    seniority: str
+    seniority: SeniorityLevel
     panelists_required: int = Field(ge=1, le=10)
     duration_minutes: int = Field(gt=0, default=60)
     buffer_minutes_before: int = Field(ge=0, default=15)
     buffer_minutes_after: int = Field(ge=0, default=15)
     hiring_manager_email: Optional[EmailStr] = None
-    candidate_name: str
+    candidate_name: str = Field(min_length=1)
     candidate_email: EmailStr
-    candidate_timezone: str
+    candidate_timezone: str = Field(min_length=1)
 
 
 class CreateRequestResponse(BaseModel):
@@ -57,7 +70,7 @@ class SubmitAvailabilityBody(BaseModel):
 
 
 class SelectSlotBody(BaseModel):
-    slot_id: str
+    slot_id: str = Field(min_length=1)
 
 
 class SeatResponseBody(BaseModel):
@@ -66,12 +79,20 @@ class SeatResponseBody(BaseModel):
 
 class InterviewerProfileBody(BaseModel):
     skills: List[str] = Field(min_length=1)
-    seniority: str
-    interview_types: List[str] = Field(min_length=1)
-    timezone: str
+    seniority: SeniorityLevel
+    interview_types: List[InterviewerQualificationType] = Field(min_length=1)
+    timezone: str = Field(min_length=1)
     working_hours_start: str = "09:00"
     working_hours_end: str = "18:00"
     active: bool = True
+
+    @model_validator(mode="after")
+    def _working_hours_not_inverted(self) -> "InterviewerProfileBody":
+        # MODULE_GUIDE.md Module 2B edge case: reject, don't silently produce
+        # an inverted/empty working-hours window.
+        if self.working_hours_start >= self.working_hours_end:
+            raise ValueError("working_hours_start must be before working_hours_end")
+        return self
 
 
 class OfferOut(BaseModel):

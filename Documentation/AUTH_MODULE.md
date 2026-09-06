@@ -46,9 +46,12 @@ stored or logged in plaintext.
 See [DATA_MODEL.md](DATA_MODEL.md) for full column listings. Summary:
 - `User` — one row per person, `role` is one of `candidate | recruiter | hiring_manager | interviewer`.
 - `OAuthToken` — one row per user, encrypted access/refresh tokens + the scope string actually granted + expiry.
-- `Interview`, `InviteToken` — minimal stubs the auth module needed to make the
-  candidate invite flow work. **The Interview Request module owns and extends
-  `Interview`** — don't create a second interviews table.
+- `Interview` — started as a minimal stub the auth module needed for the
+  candidate invite flow; the scheduling module (`app/scheduling/service.py`)
+  now owns it as the full table DATA_MODEL.md describes — don't create a
+  second interviews table.
+- `InviteToken` — still exactly what it was: a signed, single-use invite
+  letting a candidate authenticate against one specific interview.
 
 ## Using auth from your module
 

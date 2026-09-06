@@ -53,7 +53,14 @@ class BookingConflictError(Exception):
 _ALLOWED: dict[str, set[str]] = {
     "assigning_panel": {"panel_complete", "manual_scheduling_required", "cancelled"},
     "panel_complete": {"assigning_panel", "cancelled"},
-    "manual_scheduling_required": set(),
+    # A candidate cancelling out of a request that's already escalated is a
+    # real, legitimate action ("never mind, not interested anymore") - it
+    # shouldn't need a human to have picked it up first. Found reachable
+    # (and previously an unhandled crash, not just a hypothetical) via
+    # Phase 6's hardening pass: escalation during an in-progress seat
+    # cascade (one seat's pool exhausts while another seat is still
+    # confirmed) already leaves a real `Interview` row in this status.
+    "manual_scheduling_required": {"cancelled"},
     "cancelled": set(),
 }
 

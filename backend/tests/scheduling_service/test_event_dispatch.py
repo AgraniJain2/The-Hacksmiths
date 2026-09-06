@@ -90,6 +90,7 @@ class _FakeEventsResource:
         self._http_error = http_error
         self.insert_calls = []
         self.patch_calls = []
+        self.delete_calls = []
         self.get_response = None
 
     def insert(self, calendarId, body, conferenceDataVersion, sendUpdates):
@@ -101,6 +102,10 @@ class _FakeEventsResource:
         return self
 
     def get(self, calendarId, eventId):
+        return self
+
+    def delete(self, calendarId, eventId, sendUpdates):
+        self.delete_calls.append(eventId)
         return self
 
     def execute(self):
@@ -264,3 +269,79 @@ def test_email_failure_does_not_undo_the_already_created_event(db, monkeypatch):
     # The event is real and durable even though the follow-up email failed.
     assert result.calendar_event_id == "gcal-event-123"
     assert row.calendar_event_id == "gcal-event-123"
+
+
+def test_cancel_event_deletes_the_real_event_and_notifies_attendees(db, monkeypatch):
+    row = _seed(db)
+    row.calendar_event_id = "gcal-event-to-cancel"
+    row.meeting_link = "https://meet.google.com/xyz"
+    db.commit()
+    interview = _interview(row).model_copy(
+        update={"calendar_event_id": "gcal-event-to-cancel", "meet_link": "https://meet.google.com/xyz"}
+    )
+    fake_service = _FakeCalendarService()
+    monkeypatch.setattr(dispatch_module, "build", lambda *a, **k: fake_service)
+    sent = []
+    monkeypatch.setattr(
+        dispatch_module, "send_email",
+        lambda to, subject, body, ics_attachment=None, ics_filename=None: sent.append((to, subject)),
+    )
+
+    cancel_event(db, row, interview, DbInterviewerRepository(db), "the candidate cancelled")
+
+    assert fake_service.events_resource.delete_calls == ["gcal-event-to-cancel"]
+    recipients = {r[0] for r in sent}
+    assert recipients == {"cara@example.com", "iv@example.com"}
+    assert all("Cancelled" in subject for _to, subject in sent)
+
+
+def test_cancel_event_is_a_noop_when_there_was_never_a_real_event(db, monkeypatch):
+    row = _seed(db)  # calendar_event_id is None
+    interview = _interview(row)
+    fake_service = _FakeCalendarService()
+    monkeypatch.setattr(dispatch_module, "build", lambda *a, **k: fake_service)
+    monkeypatch.setattr(dispatch_module, "send_email", lambda *a, **k: pytest.fail("should not be called"))
+
+    cancel_event(db, row, interview, DbInterviewerRepository(db), "reason")  # must not raise or email anyone
+
+    assert fake_service.events_resource.delete_calls == []
+
+
+def test_cancel_event_treats_already_deleted_as_success(db, monkeypatch):
+    row = _seed(db)
+    row.calendar_event_id = "gcal-event-gone"
+    db.commit()
+    interview = _interview(row)
+    fake_resp = type("Resp", (), {"status": 410, "reason": "gone"})()
+    fake_service = _FakeCalendarService(http_error=HttpError(fake_resp, b"{}"))
+    monkeypatch.setattr(dispatch_module, "build", lambda *a, **k: fake_service)
+    monkeypatch.setattr(dispatch_module, "send_email", lambda *a, **k: None)
+
+    cancel_event(db, row, interview, DbInterviewerRepository(db), "reason")  # must not raise
+
+
+def test_remove_attendee_from_event_patches_without_the_departing_person(db, monkeypatch):
+    row = _seed(db)
+    row.calendar_event_id = "gcal-event-existing"
+    db.commit()
+    fake_service = _FakeCalendarService()
+    fake_service.events_resource.get_response = {
+        "attendees": [{"email": "cara@example.com"}, {"email": "iv@example.com"}]
+    }
+    monkeypatch.setattr(dispatch_module, "build", lambda *a, **k: fake_service)
+
+    remove_attendee_from_event(db, row, "iv@example.com")
+
+    assert len(fake_service.events_resource.patch_calls) == 1
+    remaining = {a["email"] for a in fake_service.events_resource.patch_calls[0]["attendees"]}
+    assert remaining == {"cara@example.com"}
+
+
+def test_remove_attendee_from_event_is_a_noop_without_a_real_event(db, monkeypatch):
+    row = _seed(db)  # no calendar_event_id
+    fake_service = _FakeCalendarService()
+    monkeypatch.setattr(dispatch_module, "build", lambda *a, **k: fake_service)
+
+    remove_attendee_from_event(db, row, "iv@example.com")  # must not raise
+
+    assert fake_service.events_resource.patch_calls == []

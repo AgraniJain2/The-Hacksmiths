@@ -251,15 +251,22 @@ def cancel_event(
     """Candidate cancel/reschedule: the whole booking is off - delete the
     real event (not just mark it internally) and notify every attendee.
     No-op if there was never a real event (e.g. cancelled before Module 7
-    ran)."""
-    if not row.calendar_event_id:
+    ran).
+
+    Reads the event id off `interview` (the caller's pre-cancellation
+    snapshot), not `row.calendar_event_id` - a reschedule clears the row's
+    own field *before* calling this (so a later `dispatch_confirmed_booking`
+    creates a fresh event instead of trying to sync a deleted one), and this
+    must still know which event to actually delete."""
+    event_id = interview.calendar_event_id
+    if not event_id:
         return
     attendee_emails = _attendee_emails(row, interview, interviewer_repo)
     calendar_service = _calendar_service(db, row.created_by, interview_id=row.id)
     if calendar_service is not None:
         try:
             calendar_service.events().delete(
-                calendarId="primary", eventId=row.calendar_event_id, sendUpdates="none"
+                calendarId="primary", eventId=event_id, sendUpdates="none"
             ).execute()
         except HttpError as exc:
             # 410 Gone means someone already deleted it (e.g. manually) -

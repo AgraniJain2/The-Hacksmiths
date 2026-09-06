@@ -30,7 +30,7 @@ order) — this one is the coarse per-module summary.
 | Candidate Slot Selection | ✅ Built — real DB persistence (Phase 2) | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-5--candidate-slot-selection) |
 | N-Seat Interviewer Assignment (load-balanced, per-seat cascade) | ✅ Built — real DB persistence + a real per-interviewer lock (Phase 2) + real Calendar re-check at fixed time (Phase 3) | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-6--n-seat-interviewer-assignment) |
 | Event Creation & Dispatch (Meet link, emails, .ics) | ✅ Built (Phase 4) — real Calendar event + Meet link, verified against real accounts | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-7--event-creation--dispatch) |
-| Post-Booking Exception Handling (reminders, cancel/reschedule both parties) | 🟡 Cancel/reschedule built; reminders + offer-expiry sweep not started (Phase 5) | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-8--post-booking--exception-handling) |
+| Post-Booking Exception Handling (reminders, cancel/reschedule both parties) | ✅ Built (Phase 5) — scheduled reminders + offer-expiry sweep, cancel/reschedule delete/patch the real Calendar event, verified against a real account | [MODULE_GUIDE.md](MODULE_GUIDE.md#module-8--post-booking--exception-handling) |
 | Notification Service (shared) | ✅ Built — real email via Resend (Phase 1) | [MODULE_GUIDE.md](MODULE_GUIDE.md#shared-notification-service) |
 | Frontend — Setup & Auth pages (login, callback, dashboard shell, Google connection) | ✅ Built | [FRONTEND_DESIGN_SYSTEM.md](FRONTEND_DESIGN_SYSTEM.md) |
 | Frontend — remaining pages (one per module above) | ✅ Built (all wired to the real DB-backed API now) | [FRONTEND_DESIGN_SYSTEM.md](FRONTEND_DESIGN_SYSTEM.md#adding-a-new-authenticated-page) |
