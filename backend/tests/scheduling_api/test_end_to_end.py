@@ -224,3 +224,153 @@ def test_insufficient_pool_escalates_instead_of_hanging():
     # never the same string as the recruiter's specific no_match_reason.
     assert detail["feasibility"]["candidate_message"]
     assert detail["feasibility"]["candidate_message"] != detail["feasibility"]["no_match_reason"]
+
+
+def test_dead_google_connection_surfaces_over_the_api_not_a_500(monkeypatch):
+    """Phase 3: the one real interviewer for this request has a dead Google
+    connection - the request must escalate with a specific, visible reason
+    (RequestDetail.feasibility.reauth_required_interviewer_ids), never a
+    silently-empty pool or a 500 from deep inside a Calendar call."""
+    import app.scheduling.providers.google_calendar_provider as gcal_module
+    from app.scheduling.models import FreeBusyResponse
+
+    def _dead_connection(self, owner_id, owner_type, time_range):
+        return FreeBusyResponse(
+            owner_id=owner_id, owner_type=owner_type, timezone="UTC",
+            busy=[], queried_range=time_range, reauth_required=True,
+        )
+
+    monkeypatch.setattr(gcal_module.GoogleCalendarProvider, "get_free_busy", _dead_connection)
+
+    as_(RECRUITER)
+    resp = client.post(
+        "/scheduling/requests",
+        json={
+            "interview_type": "TECHNICAL_ROUND_1",
+            "required_skills": ["python"],
+            "seniority": "MID",
+            "panelists_required": 1,
+            "candidate_name": "Dana Disconnected",
+            "candidate_email": "dana@example.com",
+            "candidate_timezone": "UTC",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    request_id = resp.json()["request"]["request_id"]
+
+    as_(INTERVIEWER)
+    resp = client.put(
+        "/scheduling/interviewer/profile",
+        json={
+            "skills": ["python"], "seniority": "SENIOR", "interview_types": ["TECHNICAL_ROUND_1"],
+            "timezone": "UTC", "working_hours_start": "00:00", "working_hours_end": "23:59",
+            "active": True,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    as_(FakeUser("user-dana", "dana@example.com", "Dana Disconnected", "candidate"))
+    resp = client.post(
+        f"/scheduling/requests/{request_id}/availability",
+        json={"windows": [{"start": "2026-09-10T04:00:00Z", "end": "2026-09-10T11:00:00Z"}]},
+    )
+    assert resp.status_code == 200, resp.text
+    detail = resp.json()
+
+    assert detail["request"]["status"] == "manual_scheduling_required"
+    assert detail["feasibility"]["reauth_required_interviewer_ids"] == [INTERVIEWER.id]
+    assert "dead Google connection" in detail["feasibility"]["no_match_reason"]
+
+
+def test_panel_complete_creates_a_real_calendar_event_over_the_api(monkeypatch):
+    """Phase 4 (Module 7): once the last seat is accepted, the router's
+    response (and a follow-up GET) carry the real calendar_event_id/meet_link
+    - proves the service-layer wiring (SchedulingService -> event_dispatch),
+    not just the dispatch function in isolation
+    (tests/scheduling_service/test_event_dispatch.py already covers that)."""
+    import app.scheduling.event_dispatch as dispatch_module
+    from app.core.security import encrypt_token
+    from app.db.models import OAuthToken
+
+    # The recruiter is the organizer - needs a real (fake) OAuthToken row.
+    seed_db = _TestSession()
+    seed_db.add(
+        OAuthToken(
+            user_id=RECRUITER.id,
+            access_token_enc=encrypt_token("fake-token"),
+            refresh_token_enc=encrypt_token("fake-refresh"),
+            scope="https://www.googleapis.com/auth/calendar",
+            expiry_utc=datetime(2100, 1, 1),
+        )
+    )
+    seed_db.commit()
+    seed_db.close()
+
+    class _FakeEvents:
+        def insert(self, calendarId, body, conferenceDataVersion, sendUpdates):
+            self.body = body
+            return self
+
+        def execute(self):
+            return {
+                "id": "gcal-event-xyz",
+                "conferenceData": {
+                    "entryPoints": [{"entryPointType": "video", "uri": "https://meet.google.com/xyz-abcd"}]
+                },
+            }
+
+    class _FakeCalendarService:
+        def events(self):
+            return _FakeEvents()
+
+    monkeypatch.setattr(dispatch_module, "build", lambda *a, **k: _FakeCalendarService())
+    sent_emails = []
+    monkeypatch.setattr(
+        dispatch_module, "send_email",
+        lambda to, subject, body, ics_attachment=None, ics_filename=None: sent_emails.append(to),
+    )
+
+    as_(RECRUITER)
+    resp = client.post(
+        "/scheduling/requests",
+        json={
+            "interview_type": "TECHNICAL_ROUND_1", "required_skills": ["python"], "seniority": "MID",
+            "panelists_required": 1, "candidate_name": "Cara Candidate",
+            "candidate_email": "cara-p4@example.com", "candidate_timezone": "UTC",
+        },
+    )
+    request_id = resp.json()["request"]["request_id"]
+
+    as_(INTERVIEWER)
+    client.put(
+        "/scheduling/interviewer/profile",
+        json={
+            "skills": ["python"], "seniority": "SENIOR", "interview_types": ["TECHNICAL_ROUND_1"],
+            "timezone": "UTC", "working_hours_start": "00:00", "working_hours_end": "23:59", "active": True,
+        },
+    )
+
+    as_(FakeUser("user-cara-p4", "cara-p4@example.com", "Cara Candidate", "candidate"))
+    resp = client.post(
+        f"/scheduling/requests/{request_id}/availability",
+        json={"windows": [{"start": "2026-09-10T04:00:00Z", "end": "2026-09-10T11:00:00Z"}]},
+    )
+    slot_id = resp.json()["feasibility"]["feasible_slots"][0]["slot_id"]
+    resp = client.post(f"/scheduling/requests/{request_id}/select-slot", json={"slot_id": slot_id})
+    interview_id = resp.json()["interview"]["interview_id"]
+
+    as_(INTERVIEWER)
+    resp = client.post(f"/scheduling/interviews/{interview_id}/seats/0/respond", json={"accept": True})
+    assert resp.status_code == 200, resp.text
+    interview = resp.json()["interview"]
+    assert interview["status"] == "panel_complete"
+    assert interview["calendar_event_id"] == "gcal-event-xyz"
+    assert interview["meet_link"] == "https://meet.google.com/xyz-abcd"
+
+    # Both attendees actually got a confirmation email.
+    assert set(sent_emails) == {"cara-p4@example.com", INTERVIEWER.email}
+
+    # And it's durable - a fresh GET shows the same event, not recomputed.
+    as_(RECRUITER)
+    resp = client.get(f"/scheduling/requests/{request_id}")
+    assert resp.json()["interview"]["calendar_event_id"] == "gcal-event-xyz"

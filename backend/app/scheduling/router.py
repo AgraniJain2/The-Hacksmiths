@@ -168,6 +168,18 @@ def _require_candidate_owns(user: User, svc: SchedulingService, request_id: str)
     return request
 
 
+def _require_candidate_or_staff(user: User, svc: SchedulingService, request_id: str):
+    """Cancelling is one action both sides legitimately need: the candidate
+    (their own interview) and staff (any recruiter/hiring_manager - matches
+    the existing list/get_request_detail permission model, which already
+    lets any staff member see any request, not just the one they created)."""
+    request = _wrap(svc.get_request, request_id)
+    is_owner_candidate = user.role == "candidate" and user.email.lower() == request.candidate_id.lower()
+    if user.role not in STAFF_ROLES and not is_owner_candidate:
+        raise HTTPException(status_code=403, detail="not_your_interview")
+    return request
+
+
 @router.get("/my-request", response_model=schemas.RequestDetail | None)
 def my_request(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if user.role != "candidate":
@@ -214,8 +226,30 @@ def cancel_request(
     request_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     svc = SchedulingService(db)
+    _require_candidate_or_staff(user, svc, request_id)
+    reason = "the candidate cancelled" if user.role == "candidate" else f"cancelled by {user.name} ({user.role})"
+    _wrap(svc.candidate_cancel, request_id, reason)
+    return _detail(svc, request_id)
+
+
+@router.post("/requests/{request_id}/reschedule", response_model=schemas.RequestDetail)
+def reschedule_request(
+    request_id: str,
+    body: schemas.SubmitAvailabilityBody,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Stage 8: the candidate's booked time no longer works - releases every
+    seat, deletes the real Calendar event if one exists, and immediately
+    accepts the new windows in the body (MODULE_GUIDE.md's Module 8: "expects
+    new/updated availability windows, loops back to Module 3")."""
+    svc = SchedulingService(db)
     _require_candidate_owns(user, svc, request_id)
-    _wrap(svc.candidate_cancel, request_id)
+    windows = [
+        AvailabilityWindow(start=w.start, end=w.end, source_timezone=w.source_timezone)
+        for w in body.windows
+    ]
+    _wrap(svc.candidate_reschedule, request_id, windows)
     return _detail(svc, request_id)
 
 

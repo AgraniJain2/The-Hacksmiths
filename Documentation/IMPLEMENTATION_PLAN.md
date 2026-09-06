@@ -15,14 +15,21 @@ before starting Phase 2 — everything from there down builds against those
 contracts, it doesn't redesign them.
 
 **Current baseline (do not redo):** auth module (real Google OAuth/RBAC/
-sessions), the pure scheduling engine (`backend/app/scheduling/{feasibility,
-assignment,reservations,state_machine,escalation,pipeline}.py`, untouched,
-still fully covered by its own 57 tests), the full HTTP surface in
-`scheduling/router.py`, and every frontend page — all now backed by **real
-DB persistence** (`scheduling/service.py` + `app/db/models.py`, Phase 2) with
-**real email** (Resend, Phase 1). `CalendarProvider` is still **mocked** -
-that's Phase 3. **Phases 0, 1, and 2 are done** (see their sections for
-exactly what shipped); Phase 3 onward is still ahead.
+sessions), the pure scheduling engine (`backend/app/scheduling/{assignment,
+reservations,state_machine,escalation,pipeline}.py`, untouched — `feasibility.py`
+gained the reauth-handling described in Phase 3, still fully covered by its
+own tests), the full HTTP surface in `scheduling/router.py`, and every
+frontend page — all now backed by **real DB persistence** (`scheduling/service.py`
++ `app/db/models.py`, Phase 2), **real email** (Resend, Phase 1), **real
+Google Calendar availability checks** (`GoogleCalendarProvider`, Phase 3),
+and **real Calendar event creation with a working Meet link**
+(`event_dispatch.py`, Phase 4) — every one of these verified against real
+connected Google accounts, not just fixtures, each phase catching (and
+fixing) a genuine bug that fixture-only testing hadn't. **Phases 0 through 4
+are done** (see their sections for exactly what shipped); Phase 5 onward is
+still ahead. The full happy path — request → availability → feasibility →
+slot pick → panel assignment → a real Calendar event with a real Meet link
+— works end to end today.
 
 **Revision note (this version):** Phase 0 (UI/UX + messaging fixes) and
 Phase 1 (email via Resend) are new, added from direct product feedback.
@@ -379,9 +386,53 @@ nothing.
 
 ---
 
-## Phase 3 — Real Google Calendar Integration
+## Phase 3 — Real Google Calendar Integration ✅ done
 
-**Goal:** feasibility and ranking check interviewers' *actual* Google
+**Shipped:** `GoogleCalendarProvider` (`app/scheduling/providers/`) calling
+real `freebusy.query` via `get_valid_access_token`, wired into
+`SchedulingService` in place of `MockCalendarProvider` for both Module 4
+(`run_feasibility`) and Module 6's live re-check
+(`feasible_interviewers_at_fixed_time`). A dead connection or a Calendar-side
+error reports `FreeBusyResponse.reauth_required=True` instead of raising -
+`feasibility.py`'s `_busy_for_pool` collects these and excludes that
+interviewer from the eligible set (never trusting an unchecked calendar as
+"confirmed free"), while `FeasibilityResult.reauth_required_interviewer_ids`
+carries *why* through to the API. Surfaced in two places: a recruiter-facing
+count banner on `RequestDetail.jsx` ("N potential panelists couldn't be
+checked..."), and a self-facing banner on the interviewer's own `Dashboard.jsx`
+when *their own* connection is dead (the one they can actually act on -
+Phase 0.3 already removed the old reconnect/disconnect buttons, so this
+points at `/settings/google`'s still-live "Connect Google" action instead).
+
+**Manual verification, done for real, not just described:** ran against the
+actual `dev.db` and two real connected Google accounts.
+- `riddhidalmia17@gmail.com` (interviewer, real OAuth row) turned out to
+  have a genuinely expired refresh token (`invalid_grant: Token has been
+  expired or revoked` - a real account aged past Google's unverified-app
+  7-day refresh-token limit). `GoogleCalendarProvider.get_free_busy` against
+  them correctly returned `reauth_required=True` with no exception - the
+  exact failure mode this phase exists to handle, hit by accident rather
+  than staged.
+- `shamvrueth@gmail.com` (interviewer, valid token) - gave them a real
+  `InterviewerProfile` (python/system-design, SENIOR, TECHNICAL_ROUND_1),
+  created a real request as `hirwani05ujjwal@gmail.com` (recruiter), and ran
+  `submit_availability` → `select_slot` end to end: their *actual* Google
+  Calendar came back with zero real busy blocks (a real, live
+  `freebusy.query` round-trip, not a fixture), 22 feasible slots computed
+  against their real working hours, slot selected, seat offered to their
+  real user id. The one throwaway request created for this walkthrough was
+  deleted afterward; their `InterviewerProfile` was left in place as
+  legitimate, reusable data.
+
+78/78 backend tests pass (`cd backend && pytest`) - `tests/conftest.py`
+stubs `GoogleCalendarProvider.get_free_busy` to "always free" by default for
+the rest of the suite (same reasoning as the Resend stub: no test should
+need a real Google token); `tests/scheduling_service/test_google_calendar_provider.py`
+restores the real method and exercises it against a fake `googleapiclient`
+transport (success, dead connection, a calendar-level error object, an
+`HttpError`, and the candidate-owner-type no-op) instead.
+
+**Goal (context for the above):** feasibility and ranking check interviewers' *actual* Google
 Calendars, not a mock.
 
 **Backend**
@@ -417,9 +468,52 @@ demoed with real accounts, not fixtures.
 
 ---
 
-## Phase 4 — Module 7: Event Creation & Dispatch
+## Phase 4 — Module 7: Event Creation & Dispatch ✅ done
 
-**Goal:** once all N seats are `ACCEPTED`, a real Google Calendar event with
+**Shipped:** `app/scheduling/event_dispatch.py`'s `dispatch_confirmed_booking`
+- called from `SchedulingService.respond_to_seat` the moment the engine's own
+transition lands on `panel_complete` (the only call site that can produce
+that status). Real `events.insert` with `conferenceData` (Meet link) and
+`conferenceDataVersion=1`, organizer = the recruiter's own token
+(`get_valid_access_token`), attendees = candidate + hiring manager (if named)
++ every confirmed interviewer (resolved via `interview.panel` →
+`InterviewerRepository`). `.ics` built with the `icalendar` package, attached
+via Phase 1's `send_email` to every attendee individually. Idempotent exactly
+as specified: `Interview.calendar_event_id` already set is a silent no-op,
+proven by a dedicated test that calls it twice and asserts one
+`events.insert`. Every Google/email failure here is logged and swallowed,
+never raised — the booking (seats confirmed) is already durable by the time
+this runs; the event/email are best-effort follow-ups, not what makes a seat
+"count." `RequestDetail.jsx` and `Candidate.jsx` both gained a "Join Google
+Meet" section once `interview.status === "panel_complete"`.
+
+**One real bug found and fixed by the manual verification, not by
+inspection:** the first version's `events.insert` payload used a bare
+`dateTime` string (with a UTC offset already in it) and no `timeZone` field.
+Google's real API rejected every one of those with `"Missing time zone
+definition for start/end time"` — the fake/recorded-transport unit tests
+didn't (and couldn't) catch this, since they don't validate against Google's
+actual strictness. Fixed by adding an explicit `"timeZone": "UTC"` to both
+`start` and `end`; a regression test now asserts that field is present in
+the payload, and the real end-to-end run below was re-verified after the fix.
+
+**Manual verification, done for real:** ran the complete flow against
+`hirwani05ujjwal@gmail.com` (recruiter/organizer) and `shamvrueth@gmail.com`
+(the same real interviewer from Phase 3's verification) — create request →
+submit availability → select slot → accept seat → a **real** Google Calendar
+event was created (fetched it back via `events().get()` to confirm: correct
+summary, correct start/end, correct attendees, a real working
+`meet.google.com` link). Confirmation emails sent via Resend to both
+attendees with the `.ics` attached (one delivery failed only because the
+throwaway candidate address used `example.com`, Resend's known
+test-domain restriction — not a real bug; a second run using a real address
+delivered cleanly). The real calendar event was deleted afterward via the
+API and the throwaway DB rows removed, so nothing was left cluttering a real
+person's calendar.
+
+84/84 backend tests pass (`cd backend && pytest`).
+
+**Goal (context for the above):** once all N seats are `ACCEPTED`, a real Google Calendar event with
 a Meet link actually gets created, and everyone gets a confirmation with an
 `.ics` fallback.
 

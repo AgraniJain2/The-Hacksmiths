@@ -132,6 +132,13 @@ class FreeBusyResponse(BaseModel):
     timezone: str
     busy: List[FreeBusyBlock]
     queried_range: TimeRange
+    # Set by a real CalendarProvider (Phase 3) when it couldn't produce a
+    # valid Google token for this owner (dead/revoked connection) - `busy`
+    # is meaningless in that case (there was no real query), never "confirmed
+    # free". feasibility.py excludes anyone flagged this way from the
+    # eligible-at-this-slot count rather than trusting an empty busy list -
+    # see Documentation/IMPLEMENTATION_PLAN.md Phase 3's ReauthRequired note.
+    reauth_required: bool = False
 
 
 class FeasibleSlot(BaseModel):
@@ -154,6 +161,11 @@ class FeasibilityResult(BaseModel):
     feasible_slots: List[FeasibleSlot]  # empty => nothing feasible
     no_match_reason: Optional[str] = None  # populated when feasible_slots is empty - recruiter-facing, specific
     candidate_message: Optional[str] = None  # populated when feasible_slots is empty - candidate-facing, generic
+    # interviewer_ids excluded from this computation because their Google
+    # connection is dead, not because they're unqualified/busy - surfaced
+    # separately so the UI reads "needs to reconnect," never "not free" or a
+    # silent disappearance from every slot (Phase 3 - see FreeBusyResponse).
+    reauth_required_interviewer_ids: List[str] = []
     generated_at: datetime
 
 

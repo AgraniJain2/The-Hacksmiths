@@ -28,7 +28,7 @@ separate, deterministic step.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from .config import SchedulingConfig
 from .models import (
@@ -148,12 +148,21 @@ def compute_feasible_slots(
 
 def _busy_for_pool(
     pool: Sequence[Interviewer], calendar: CalendarProvider, time_range: TimeRange
-) -> Dict[str, Sequence[FreeBusyBlock]]:
+) -> Tuple[Dict[str, Sequence[FreeBusyBlock]], Set[str]]:
+    """Returns (busy-by-interviewer, ids whose calendar couldn't actually be
+    checked - a dead Google connection, not a real "confirmed free" result).
+    Callers must exclude the latter from the eligible pool before computing
+    feasibility - an empty busy list for them means "never queried," not
+    "verified free" (Phase 3's ReauthRequired handling, see models.py's
+    FreeBusyResponse.reauth_required)."""
     busy: Dict[str, Sequence[FreeBusyBlock]] = {}
+    reauth_required: Set[str] = set()
     for interviewer in pool:
         fb = calendar.get_free_busy(interviewer.interviewer_id, "interviewer", time_range)
         busy[interviewer.interviewer_id] = fb.busy
-    return busy
+        if fb.reauth_required:
+            reauth_required.add(interviewer.interviewer_id)
+    return busy, reauth_required
 
 
 def run_feasibility(
@@ -170,7 +179,7 @@ def run_feasibility(
     config = config or SchedulingConfig()
     generated_at = ensure_utc(now or datetime.now(timezone.utc))
 
-    def _empty(reason: str) -> FeasibilityResult:
+    def _empty(reason: str, reauth_ids: Sequence[str] = ()) -> FeasibilityResult:
         return FeasibilityResult(
             request_id=request.request_id,
             candidate_id=request.candidate_id,
@@ -178,6 +187,7 @@ def run_feasibility(
             feasible_slots=[],
             no_match_reason=reason,
             candidate_message=CANDIDATE_NO_MATCH_MESSAGE,
+            reauth_required_interviewer_ids=sorted(reauth_ids),
             generated_at=generated_at,
         )
 
@@ -189,13 +199,15 @@ def run_feasibility(
     window_start = min(ensure_utc(w.start) for w in candidate_availability.windows)
     window_end = max(ensure_utc(w.end) for w in candidate_availability.windows)
     time_range = TimeRange(start=window_start, end=window_end)
-    interviewer_busy = _busy_for_pool(pool_result.pool, calendar, time_range)
+    interviewer_busy, reauth_ids = _busy_for_pool(pool_result.pool, calendar, time_range)
+    # Never trust an unchecked calendar as "confirmed free" - see _busy_for_pool.
+    verified_pool = [iv for iv in pool_result.pool if iv.interviewer_id not in reauth_ids]
 
     slots = compute_feasible_slots(
         request=request,
         round_=round_,
         candidate_availability=candidate_availability,
-        eligible_pool=pool_result.pool,
+        eligible_pool=verified_pool,
         interviewer_busy=interviewer_busy,
         config=config,
         now=generated_at,
@@ -206,8 +218,9 @@ def run_feasibility(
             f"{request.panelists_required} qualified interviewer(s) free "
             f"(eligible pool of {pool_result.matched}, duration {round_.duration_minutes}m "
             f"+ buffers {round_.buffer_minutes_before}/{round_.buffer_minutes_after}m)"
+            + (f" - {len(reauth_ids)} of them couldn't be checked (dead Google connection)" if reauth_ids else "")
         )
-        return _empty(reason)
+        return _empty(reason, reauth_ids)
 
     return FeasibilityResult(
         request_id=request.request_id,
@@ -215,6 +228,7 @@ def run_feasibility(
         panelists_required=request.panelists_required,
         feasible_slots=slots,
         no_match_reason=None,
+        reauth_required_interviewer_ids=sorted(reauth_ids),
         generated_at=generated_at,
     )
 
@@ -242,11 +256,17 @@ def feasible_interviewers_at_fixed_time(
         start=ensure_utc(slot_start) - timedelta(hours=1),
         end=ensure_utc(slot_end) + timedelta(hours=1),
     )
-    interviewer_busy = _busy_for_pool(pool_result.pool, calendar, time_range)
+    interviewer_busy, reauth_ids = _busy_for_pool(pool_result.pool, calendar, time_range)
+    # Same safe-exclusion as run_feasibility (see _busy_for_pool) - this
+    # function's plain List[str] return has no room to also surface *why*
+    # someone's missing, so that's only ever shown via FeasibilityResult
+    # (Module 4's display); this live re-check (Module 6) just has to not
+    # wrongly treat a dead connection as "confirmed free."
+    verified_pool = [iv for iv in pool_result.pool if iv.interviewer_id not in reauth_ids]
     return feasible_interviewers_at(
         slot_start=slot_start,
         slot_end=slot_end,
-        eligible_pool=pool_result.pool,
+        eligible_pool=verified_pool,
         interviewer_busy=interviewer_busy,
         round_=round_,
         reservations=reservations,

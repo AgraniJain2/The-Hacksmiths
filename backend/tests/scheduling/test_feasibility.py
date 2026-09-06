@@ -64,6 +64,35 @@ def test_panel_needs_at_least_n_feasible_per_slot(panel_scenario):
         assert slot.feasible_count >= 3
 
 
+def test_reauth_required_interviewer_is_excluded_but_others_still_found(panel_scenario):
+    # 4 eligible (p1-p4), N=3 required - flagging one as a dead Google
+    # connection still leaves enough of the *other* three to fill the panel.
+    panel_scenario.calendar.mark_reauth_required("iv-p4")
+    _, result = _feasibility(panel_scenario)
+    assert result.feasible_slots
+    assert result.reauth_required_interviewer_ids == ["iv-p4"]
+    for slot in result.feasible_slots:
+        assert "iv-p4" not in slot.feasible_interviewer_ids
+        # Phase 3: a reauth-flagged interviewer must never be silently
+        # counted as calendar-free just because their busy list came back
+        # empty (there was no real query at all).
+        assert slot.feasible_count >= 3
+
+
+def test_reauth_required_interviewer_is_never_silently_treated_as_free(panel_scenario):
+    # Same pool, but flag *two* of the four - only 2 verifiable interviewers
+    # remain, short of the N=3 the request needs, so this must escalate
+    # rather than quietly pretend the flagged two are free to hit the count.
+    panel_scenario.calendar.mark_reauth_required("iv-p3")
+    panel_scenario.calendar.mark_reauth_required("iv-p4")
+    _, result = _feasibility(panel_scenario)
+    assert result.feasible_slots == []
+    assert set(result.reauth_required_interviewer_ids) == {"iv-p3", "iv-p4"}
+    assert "dead Google connection" in result.no_match_reason
+    # The candidate never sees this internal detail either way.
+    assert "Google" not in result.candidate_message
+
+
 def test_no_feasible_slot_returns_reason_and_no_slots(no_feasible_slot):
     _, result = _feasibility(no_feasible_slot)
     assert result.feasible_slots == []

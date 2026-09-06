@@ -10,11 +10,13 @@ ABCs.
 **Provider wiring status** (Documentation/IMPLEMENTATION_PLAN.md): real,
 SQLAlchemy-backed providers (`providers/db_*.py`) and `service.py` (the
 `SchedulingService` `router.py` actually calls) replaced the old in-memory
-store in Phase 2 — state now survives a restart. `mock_*.py` + `fixtures.py`
-haven't gone anywhere; they're what this package's own tests
-(`tests/scheduling/`) are built on, deliberately independent of whichever
-real backing exists. `CalendarProvider` is still the mock (`MockCalendarProvider`)
-in the live app too — that swap is Phase 3, not done yet.
+store in Phase 2 — state now survives a restart. `CalendarProvider` is real
+Google Calendar as of Phase 3 (`GoogleCalendarProvider` — `freebusy.query`
+against each interviewer's own primary calendar; a dead connection reports
+`FreeBusyResponse.reauth_required` rather than crashing or lying about
+availability, see `feasibility.py`). `mock_*.py` + `fixtures.py` haven't gone
+anywhere; they're what this package's own tests (`tests/scheduling/`) are
+built on, deliberately independent of whichever real backing exists.
 
 This package implements workflow **steps 4, 6, and the step-8 re-computations**
 (see [WORKFLOW.md](WORKFLOW.md)). Auth, the candidate-facing link pages,
@@ -199,5 +201,6 @@ state machine at all. Done: `CandidateRepository`, `InterviewerRepository`,
 (all real, DB/Resend-backed — `db_*.py` + `app/notifications/`), plus
 `ReservationLedger`'s DB-backed replacement (`DbReservationLedger` — not an
 ABC itself, see its own docstring for why, but the same swap-at-one-point
-principle). Still mocked: `CalendarProvider` (Phase 3 —
-Documentation/IMPLEMENTATION_PLAN.md).
+principle) and `CalendarProvider` (`GoogleCalendarProvider`, Phase 3 —
+Documentation/IMPLEMENTATION_PLAN.md). Every provider ABC now has a real
+implementation backing it in the live app.

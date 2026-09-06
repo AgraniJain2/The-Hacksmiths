@@ -199,7 +199,24 @@ export default function Candidate() {
               ? "Your panel is fully confirmed."
               : `Waiting on ${interview.seats.length - interview.seats.filter((s) => s.status === "accepted").length} of ${interview.seats.length} interviewers to confirm.`}
           </p>
-          <button className="btn btn-outline" style={{ marginTop: "1.5rem" }} onClick={cancel} disabled={busy}>
+          {request.status === "panel_complete" && (
+            interview.meet_link ? (
+              <a
+                href={interview.meet_link}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-primary"
+                style={{ marginTop: "1rem" }}
+              >
+                Join Google Meet
+              </a>
+            ) : (
+              <p className="field-hint" style={{ marginTop: "1rem" }}>
+                Your calendar invite and Meet link are being created — check your email shortly.
+              </p>
+            )
+          )}
+          <button className="btn btn-outline" style={{ marginTop: "1rem" }} onClick={cancel} disabled={busy}>
             Cancel interview
           </button>
         </div>

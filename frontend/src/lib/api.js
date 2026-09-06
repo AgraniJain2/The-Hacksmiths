@@ -88,6 +88,13 @@ export const api = {
   /** Candidate: cancel their interview. */
   cancelRequest: (requestId) => request(`/scheduling/requests/${requestId}/cancel`, { method: "POST" }),
 
+  /** Candidate: cancel + immediately resubmit new availability windows. */
+  rescheduleRequest: (requestId, windows) =>
+    request(`/scheduling/requests/${requestId}/reschedule`, {
+      method: "POST",
+      body: JSON.stringify({ windows }),
+    }),
+
   /** Interviewer: their own pool profile, or null if never registered. */
   getMyInterviewerProfile: () => request("/scheduling/interviewer/profile"),
 

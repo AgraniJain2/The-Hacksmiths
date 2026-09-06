@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import GoogleConnectionCard from "../components/GoogleConnectionCard";
 import ActivityCalendar from "../components/ActivityCalendar";
 import StatusPill from "../components/StatusPill";
+import { IconAlert } from "../components/icons";
 import { ROLE_LABELS, initials } from "../components/AppShell";
 import styles from "./Dashboard.module.css";
 
@@ -170,6 +171,19 @@ export default function Dashboard() {
           </p>
         </div>
       </div>
+
+      {isInterviewer && user?.google_connected === false && (
+        <div className={styles.reauthBanner}>
+          <IconAlert width={16} height={16} style={{ display: "inline", verticalAlign: "-3px", marginRight: 6 }} />
+          Your Google connection needs to be reconnected — until then, requests can't check your
+          calendar and you may quietly miss out on panel offers. Sign out and back in with Google
+          to fix it, or see{" "}
+          <Link to="/settings/google" className={styles.reauthLink}>
+            Google connection
+          </Link>
+          .
+        </div>
+      )}
 
       {activity.stats && activity.stats.length > 0 && (
         <div className={styles.statsRow}>

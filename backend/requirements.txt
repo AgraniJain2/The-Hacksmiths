@@ -20,3 +20,9 @@ email-validator>=2.1.0
 
 # app/scheduling/router.py (EmailStr fields) + tests/scheduling_api (TestClient)
 httpx>=0.27.0
+
+# app/scheduling/event_dispatch.py (Module 7 - .ics generation, Phase 4)
+icalendar==7.3.0
+
+# app/scheduling/jobs.py (Module 8 - reminder + offer-expiry sweep, Phase 5)
+apscheduler==3.11.3

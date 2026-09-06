@@ -132,11 +132,18 @@ class Interview(Base):
     # confirmed time).
     confirmed_start_utc = Column(DateTime, nullable=True)
     confirmed_end_utc = Column(DateTime, nullable=True)
-    calendar_event_id = Column(String, nullable=True)  # set by Module 7 (not yet built)
+    calendar_event_id = Column(String, nullable=True)  # set by Module 7 (Phase 4)
     meeting_link = Column(String, nullable=True)
 
     seats_json = Column(JSON, nullable=True, default=list)
     feasibility_json = Column(JSON, nullable=True)
+
+    # Module 8 (Phase 5) - set once the reminder sweep has sent one for this
+    # interview, so it's never sent twice. Not in DATA_MODEL.md's literal
+    # spec (that doc doesn't track reminder state at all) - same reasoning
+    # as this file's other additions: needed by the real implementation,
+    # noted here rather than silently drifting from the doc.
+    reminder_sent_at = Column(DateTime, nullable=True)
 
 
 class InterviewerProfile(Base):
@@ -188,8 +195,14 @@ class InterviewSlotOffer(Base):
     `status` values: OFFERED, ACCEPTED, DECLINED, EXPIRED, RELEASED (the last
     is this implementation's addition - used when an interview-wide release,
     e.g. a candidate cancellation, clears an offer that was never explicitly
-    declined by the interviewer). Timeout-driven EXPIRED isn't produced by
-    anything yet - there's no scheduled sweep until Phase 5 (Module 8).
+    declined by the interviewer). EXPIRED is set by
+    `SchedulingService.sweep_expired_offers` (Phase 5's scheduled job) after
+    the engine's own timeout cascade runs - the ledger's `release()` (called
+    from inside that cascade, same as an explicit decline) always marks the
+    row DECLINED first since it can't tell the two apart from its own
+    duck-typed signature; the sweep then flips the specific just-timed-out
+    row to EXPIRED for an accurate audit trail. Purely observational -
+    nothing re-reads this distinction for scheduling behavior.
     """
 
     __tablename__ = "interview_slot_offers"

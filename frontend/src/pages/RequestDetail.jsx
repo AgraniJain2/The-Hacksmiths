@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../lib/api";
 import StatusPill from "../components/StatusPill";
 import Spinner from "../components/Spinner";
-import { IconAlert } from "../components/icons";
+import { IconAlert, IconCalendar, IconCheck } from "../components/icons";
 import styles from "./RequestDetail.module.css";
 
 export default function RequestDetail() {
@@ -40,6 +40,15 @@ export default function RequestDetail() {
         </Link>
       </div>
 
+      {feasibility?.reauth_required_interviewer_ids?.length > 0 && (
+        <div className={styles.reauthNotice}>
+          <IconAlert width={16} height={16} style={{ display: "inline", verticalAlign: "-3px", marginRight: 6 }} />
+          {feasibility.reauth_required_interviewer_ids.length === 1
+            ? "1 potential panelist couldn't be checked — their Google connection needs to be reconnected."
+            : `${feasibility.reauth_required_interviewer_ids.length} potential panelists couldn't be checked — their Google connections need to be reconnected.`}
+        </div>
+      )}
+
       {request.status === "manual_scheduling_required" && feasibility?.no_match_reason && (
         <div className={styles.escalation} style={{ marginBottom: "1.5rem" }}>
           <p className={styles.escalationTitle}>
@@ -47,6 +56,23 @@ export default function RequestDetail() {
             Needs manual scheduling
           </p>
           <p>{feasibility.no_match_reason}</p>
+        </div>
+      )}
+
+      {interview?.status === "panel_complete" && (
+        <div className={styles.bookedCard}>
+          <IconCheck width={20} height={20} className={styles.bookedIcon} />
+          <div>
+            <p className={styles.bookedTitle}>Booked — {new Date(interview.slot_start).toLocaleString()}</p>
+            {interview.meet_link ? (
+              <a href={interview.meet_link} target="_blank" rel="noreferrer" className={styles.bookedLink}>
+                <IconCalendar width={14} height={14} style={{ marginRight: 4 }} />
+                Join Google Meet
+              </a>
+            ) : (
+              <p className={styles.bookedSubtitle}>Calendar invite is being created…</p>
+            )}
+          </div>
         </div>
       )}
 

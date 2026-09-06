@@ -16,6 +16,22 @@
   margin-top: var(--space-1);
 }
 
+.reauthBanner {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  background: var(--warning-bg);
+  border: 1px solid var(--warning);
+  color: var(--warning);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.reauthLink {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));

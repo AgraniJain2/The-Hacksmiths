@@ -18,16 +18,18 @@ pure code), but every FK in this schema (`InterviewSlotOffer.interview_id`,
 so this collapses the two identifiers rather than tracking a translation
 table for no benefit.
 
-``CalendarProvider`` stays mocked this phase (Phase 3, not this one) -
-`MockCalendarProvider` never has any interviewer's busy times configured
-here, same as ``store.py`` before it, so everyone reads as calendar-free;
-working hours + skills/seniority are what actually filter people today.
+``CalendarProvider`` is real Google Calendar as of Phase 3
+(``GoogleCalendarProvider`` - `freebusy.query` against each interviewer's own
+primary calendar, via their own token). A dead connection doesn't crash
+anything - see that class's docstring and `feasibility.py`'s
+`reauth_required` handling.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -42,6 +44,7 @@ from app.notifications.provider import ResendNotificationProvider
 from .assignment import AssignmentOutcome, PanelAssignmentAgent
 from .config import SchedulingConfig
 from .escalation import escalate_to_manual_scheduling
+from .event_dispatch import cancel_event, dispatch_confirmed_booking, remove_attendee_from_event, send_reminder
 from .feasibility import feasible_interviewers_at_fixed_time
 from .models import (
     AvailabilityWindow,
@@ -59,10 +62,12 @@ from .providers.db_availability_repository import DbAvailabilityRepository
 from .providers.db_interviewer_load_provider import DbInterviewerLoadProvider
 from .providers.db_reservation_ledger import DbReservationLedger
 from .providers.db_repositories import DbCandidateRepository, DbInterviewerRepository
-from .providers.mock_calendar_provider import MockCalendarProvider
+from .providers.google_calendar_provider import GoogleCalendarProvider
 from .state_machine import InterviewStateMachine
+from .timeutils import ensure_utc
 
 UTC = timezone.utc
+logger = logging.getLogger(__name__)
 
 
 class NotFoundError(KeyError):
@@ -156,7 +161,7 @@ class SchedulingService:
         self.candidate_repo = DbCandidateRepository(db)
         self.interviewer_repo = DbInterviewerRepository(db)
         self.availability_repo = DbAvailabilityRepository(db)
-        self.calendar = MockCalendarProvider()
+        self.calendar = GoogleCalendarProvider(db)
         self.reservations = DbReservationLedger(db)
         self.load_provider = DbInterviewerLoadProvider(db)
         self.notifier = ResendNotificationProvider(
@@ -401,18 +406,29 @@ class SchedulingService:
                 self._mark_offer_and_confirm(row, seat_index, actor_interviewer_id, outcome.interview)
             self._sync_accepted_seats(row, outcome.interview)
             self.db.commit()
-            return _row_to_interview(row), _row_to_request(row)
         except Exception:
             self.db.rollback()
             raise
+
+        if outcome.interview.status == "panel_complete":
+            self._dispatch_booking_if_complete(row)
+        return _row_to_interview(row), _row_to_request(row)
 
     def interviewer_cancel(self, interview_id: str, interviewer_id: str) -> Tuple[Interview, InterviewRequest]:
         row = self._get_row(interview_id)
         interview = _row_to_interview(row)
         if interview is None:
             raise NotFoundError(f"no interview {interview_id!r}")
+        self._reject_if_past(row)
         request = _row_to_request(row)
         round_ = _row_to_round(row)
+
+        # Resolved before the transaction touches anything - used for the
+        # real-Calendar removal below regardless of how the cascade goes.
+        try:
+            departing_email = self.interviewer_repo.get_interviewer(interviewer_id).email
+        except Exception:  # noqa: BLE001
+            departing_email = None
 
         try:
             # Cancel the confirmed roster row *before* the engine re-cascades
@@ -444,26 +460,86 @@ class SchedulingService:
             _persist_interview(row, outcome.interview, outcome.request)
             self._sync_accepted_seats(row, outcome.interview)
             self.db.commit()
-            return _row_to_interview(row), _row_to_request(row)
         except Exception:
             self.db.rollback()
             raise
 
+        # Real Calendar sync (Phase 5), after the DB state is durable: drop
+        # the departing interviewer from the existing event immediately: if
+        # the cascade already landed on a replacement (status is
+        # panel_complete again), _dispatch_booking_if_complete's attendee
+        # sync will add them right after - two independent, idempotent steps
+        # rather than trying to track "remove X, add Y" as one operation.
+        remove_attendee_from_event(self.db, row, departing_email)
+        if outcome.interview.status == "panel_complete":
+            self._dispatch_booking_if_complete(row)
+        return _row_to_interview(row), _row_to_request(row)
+
     def candidate_cancel(self, request_id: str, reason: str = "candidate cancelled") -> InterviewRequest:
         row = self._get_row(request_id)
+        self._reject_if_past(row)
+        interview_before = _row_to_interview(row)  # snapshot - attendees before seats are wiped
         try:
-            interview = _row_to_interview(row)
-            if interview is not None and interview.status != "cancelled":
+            if interview_before is not None and interview_before.status != "cancelled":
                 sm = self._state_machine()
-                cancelled = sm.candidate_cancel(interview, reason=reason)
+                cancelled = sm.candidate_cancel(interview_before, reason=reason)
                 _persist_interview(row, cancelled, _row_to_request(row))
             row.status = "cancelled"
             row.updated_at = datetime.now(UTC)
             self.db.commit()
-            return _row_to_request(row)
         except Exception:
             self.db.rollback()
             raise
+
+        if interview_before is not None:
+            cancel_event(self.db, row, interview_before, self.interviewer_repo, reason)
+        return _row_to_request(row)
+
+    def candidate_reschedule(
+        self, request_id: str, windows: List[AvailabilityWindow]
+    ) -> Tuple[InterviewRequest, FeasibilityOutcome]:
+        """Stage 8: the candidate's booked time no longer works. Release all
+        seats, delete the real Calendar event if one exists, reset to
+        `collecting_availability`, then immediately accept the new windows -
+        looping back to Module 3/4 in one call rather than requiring a
+        second request (MODULE_GUIDE.md's Module 8: "expects new/updated
+        availability windows, loops back to Module 3")."""
+        row = self._get_row(request_id)
+        self._reject_if_past(row)
+        reason = "candidate requested a reschedule; collecting new availability"
+        interview_before = _row_to_interview(row)
+        try:
+            if interview_before is not None and interview_before.status != "cancelled":
+                sm = self._state_machine()
+                cancelled, updated_request = sm.candidate_reschedule(interview_before, _row_to_request(row))
+                _persist_interview(row, cancelled, updated_request)
+                row.status = updated_request.status
+            else:
+                row.status = "collecting_availability"
+            # The old event (if any) is being deleted below - nothing should
+            # still point at it, or dispatch_confirmed_booking would later
+            # try to sync attendees onto a since-deleted event instead of
+            # creating a fresh one.
+            row.calendar_event_id = None
+            row.meeting_link = None
+            row.confirmed_start_utc = None
+            row.confirmed_end_utc = None
+            row.feasibility_json = None
+            row.reminder_sent_at = None
+            row.updated_at = datetime.now(UTC)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+
+        if interview_before is not None:
+            cancel_event(self.db, row, interview_before, self.interviewer_repo, reason)
+
+        return self.submit_availability(request_id, windows)
+
+    def _reject_if_past(self, row: InterviewRow) -> None:
+        if row.confirmed_start_utc and ensure_utc(row.confirmed_start_utc) < datetime.now(UTC):
+            raise ValueError(f"interview {row.id} has already happened - can't cancel or reschedule it now")
 
     # -- internal helpers -------------------------------------------------
 
@@ -579,6 +655,121 @@ class SchedulingService:
                 )
             )
             self.db.flush()
+
+    def _dispatch_booking_if_complete(self, row: InterviewRow) -> None:
+        """Module 7 (Phase 4): once every seat is confirmed, create the real
+        Calendar event + send the confirmation/.ics - or, if this interview
+        already has one (Phase 5: a confirmed interviewer cancelled and the
+        cascade just found a replacement), sync its attendees instead of
+        creating a second event. Called *after* the main transaction above
+        has already committed the seat-acceptance itself - a Calendar/email
+        failure here must never undo an already-successful seat acceptance,
+        so this runs in its own try/except and never raises past this
+        point."""
+        try:
+            interview = _row_to_interview(row)
+            if interview is not None:
+                dispatch_confirmed_booking(self.db, row, interview, self.interviewer_repo)
+        except Exception:  # noqa: BLE001 - see docstring, this must never propagate
+            logger.warning("Event dispatch failed for interview %s", row.id, exc_info=True)
+
+    # -- Module 8 (Phase 5): scheduled sweeps ---------------------------------
+
+    def sweep_expired_offers(self) -> List[str]:
+        """Expire any `offered` seat past its `offer_expires_at` and cascade
+        that seat - same per-seat cascade an explicit decline triggers
+        (`assignment.py`'s `process_timeouts`, already fully tested against
+        the pure engine). Returns the ids of interviews touched, for the
+        caller (`jobs.py`'s scheduled sweep) to log. Reads expiry off each
+        interview's own `seats_json` (the engine's own authoritative offer
+        state), not `InterviewSlotOffer.expires_at` - see that column's note
+        in `db_reservation_ledger.py`'s `reserve()` for why the row-level
+        column is best-effort/observational, not what this sweep trusts."""
+        now = datetime.now(UTC)
+        rows = self.db.query(InterviewRow).filter(InterviewRow.status == "assigning_panel").all()
+        touched: List[str] = []
+
+        for row in rows:
+            interview = _row_to_interview(row)
+            if interview is None:
+                continue
+            expired_seats = [
+                s.seat_index
+                for s in interview.seats
+                if s.status == "offered" and s.offer_expires_at and ensure_utc(s.offer_expires_at) < now
+            ]
+            if not expired_seats:
+                continue
+
+            request = _row_to_request(row)
+            round_ = _row_to_round(row)
+            try:
+                feasible_now = self._feasible_now(request, round_, interview)
+                sm = self._state_machine()
+                outcome: AssignmentOutcome = sm.process_offer_timeouts(
+                    interview=interview, request=request, round_=round_, feasible_ids_at_slot=feasible_now,
+                )
+                _persist_interview(row, outcome.interview, outcome.request)
+                self._sync_accepted_seats(row, outcome.interview)
+                # More accurate than the ledger's generic DECLINED default
+                # (see DbReservationLedger.release()) - purely observational,
+                # nothing reads this back for behavior.
+                for seat_index in expired_seats:
+                    stale_offer = (
+                        self.db.query(InterviewSlotOffer)
+                        .filter(
+                            InterviewSlotOffer.interview_id == row.id,
+                            InterviewSlotOffer.seat_index == seat_index,
+                            InterviewSlotOffer.status == "DECLINED",
+                        )
+                        .order_by(InterviewSlotOffer.offered_at.desc())
+                        .first()
+                    )
+                    if stale_offer is not None:
+                        stale_offer.status = "EXPIRED"
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
+                logger.warning("Offer-expiry sweep failed for interview %s", row.id, exc_info=True)
+                continue
+
+            if outcome.interview.status == "panel_complete":
+                self._dispatch_booking_if_complete(row)
+            touched.append(row.id)
+
+        return touched
+
+    def sweep_reminders(self, window_hours: int = 24) -> List[str]:
+        """Send a reminder to every attendee of a confirmed interview
+        starting within `window_hours`, once. Returns the ids of interviews
+        reminded, for the caller to log."""
+        now = datetime.now(UTC)
+        window_end = now + timedelta(hours=window_hours)
+        rows = (
+            self.db.query(InterviewRow)
+            .filter(
+                InterviewRow.status == "panel_complete",
+                InterviewRow.reminder_sent_at.is_(None),
+                InterviewRow.confirmed_start_utc.isnot(None),
+                InterviewRow.confirmed_start_utc >= now,
+                InterviewRow.confirmed_start_utc <= window_end,
+            )
+            .all()
+        )
+        reminded: List[str] = []
+        for row in rows:
+            interview = _row_to_interview(row)
+            if interview is None:
+                continue
+            try:
+                send_reminder(row, interview, self.interviewer_repo)  # swallows its own per-recipient errors
+                row.reminder_sent_at = now
+                self.db.commit()
+                reminded.append(row.id)
+            except Exception:
+                self.db.rollback()
+                logger.warning("Reminder sweep failed for interview %s", row.id, exc_info=True)
+        return reminded
 
     # -- interviewer directory (Module 2B) ------------------------------------
 
