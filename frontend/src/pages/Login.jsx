@@ -1,5 +1,6 @@
 import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { homeRouteFor } from "../lib/roles";
 import { api } from "../lib/api";
 import BackgroundFX from "../components/BackgroundFX";
 import Logo from "../components/Logo";
@@ -7,13 +8,13 @@ import { IconGoogle, IconSparkle } from "../components/icons";
 import styles from "./Login.module.css";
 
 export default function Login() {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
   const [params] = useSearchParams();
   const inviteToken = params.get("invite_token");
 
   // Nothing to do if we already have a session — send straight through.
   if (status === "authenticated") {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={homeRouteFor(user.role)} replace />;
   }
 
   return (

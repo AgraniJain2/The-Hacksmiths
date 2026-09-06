@@ -1,5 +1,6 @@
 import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { homeRouteFor } from "../lib/roles";
 import BackgroundFX from "../components/BackgroundFX";
 import Spinner from "../components/Spinner";
 import { IconAlert } from "../components/icons";
@@ -13,10 +14,10 @@ import styles from "./AuthComplete.module.css";
  * duplicating the request.
  */
 export default function AuthComplete() {
-  const { status, error, refetch } = useAuth();
+  const { status, user, error, refetch } = useAuth();
 
   if (status === "authenticated") {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={homeRouteFor(user.role)} replace />;
   }
 
   return (

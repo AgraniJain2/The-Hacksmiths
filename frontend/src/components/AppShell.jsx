@@ -19,6 +19,29 @@ function initials(name) {
   return (parts[0][0] + (parts[1]?.[0] || "")).toUpperCase();
 }
 
+function navLinksForRole(role) {
+  const shared = [{ to: "/settings/google", label: "Google" }];
+  if (role === "candidate") {
+    return [{ to: "/candidate", label: "My interview" }, ...shared, { to: "/notifications", label: "Notifications" }];
+  }
+  if (role === "interviewer") {
+    return [
+      { to: "/dashboard", label: "Dashboard" },
+      { to: "/interviewer/offers", label: "My offers" },
+      { to: "/interviewer/profile", label: "My profile" },
+      ...shared,
+      { to: "/notifications", label: "Notifications" },
+    ];
+  }
+  // recruiter / hiring_manager
+  return [
+    { to: "/dashboard", label: "Dashboard" },
+    { to: "/requests", label: "Requests" },
+    ...shared,
+    { to: "/notifications", label: "Notifications" },
+  ];
+}
+
 /**
  * Layout for every authenticated page: sticky nav (logo, primary nav, theme
  * toggle, user chip) + centered content column. Add a new authenticated
@@ -39,21 +62,15 @@ export default function AppShell() {
       <header className={styles.nav}>
         <Logo size="sm" />
         <nav className={styles.navLinks}>
-          <NavLink
-            to="/dashboard"
-            className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ""}`}
-          >
-            Dashboard
-          </NavLink>
-          <NavLink
-            to="/settings/google"
-            className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ""}`}
-          >
-            Google
-          </NavLink>
-          <span className={styles.navLinkDisabled} title="Ships with Module 2">
-            Interviews
-          </span>
+          {navLinksForRole(user?.role).map((link) => (
+            <NavLink
+              key={link.to}
+              to={link.to}
+              className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ""}`}
+            >
+              {link.label}
+            </NavLink>
+          ))}
         </nav>
         <div className={styles.navActions}>
           <ThemeToggle />

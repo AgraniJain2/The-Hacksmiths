@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from app.auth.google_oauth import ReauthRequired
 from app.auth.router import auth_router, google_router
 from app.core.config import settings
+from app.scheduling.router import router as scheduling_router
 
 app = FastAPI(title="Smart Interview Scheduler API")
 
@@ -18,6 +19,7 @@ app.add_middleware(
 
 app.include_router(google_router)
 app.include_router(auth_router)
+app.include_router(scheduling_router)
 
 
 @app.exception_handler(ReauthRequired)

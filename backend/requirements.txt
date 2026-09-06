@@ -16,3 +16,7 @@ python-dotenv==1.0.1
 # app/scheduling/ (the scheduling engine, moved from the root uv project)
 tzdata>=2024.1
 pytest>=8.0
+email-validator>=2.1.0
+
+# app/scheduling/router.py (EmailStr fields) + tests/scheduling_api (TestClient)
+httpx>=0.27.0

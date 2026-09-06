@@ -52,6 +52,68 @@ export const api = {
     `${API_BASE_URL}/auth/google/login${
       inviteToken ? `?invite_token=${encodeURIComponent(inviteToken)}` : ""
     }`,
+
+  // ---- Scheduling (app/scheduling/router.py) ----------------------------
+  // Backed by an in-memory store (state resets if the backend restarts) and
+  // mock Calendar/notification providers — see Documentation/SCHEDULER.md
+  // and the store's own docstring. Real DB + Calendar wiring is follow-up
+  // work, not yet built; this is the honest "current implementation."
+
+  /** Recruiter/hiring_manager: create a request. Returns {request, round, invite_link}. */
+  createRequest: (body) => request("/scheduling/requests", { method: "POST", body: JSON.stringify(body) }),
+
+  /** Recruiter/hiring_manager: every request they can see. */
+  listRequests: () => request("/scheduling/requests"),
+
+  /** Any role permitted to view this specific request (staff, or its own candidate). */
+  getRequest: (requestId) => request(`/scheduling/requests/${requestId}`),
+
+  /** Candidate: their own request, or null if none exists yet. */
+  myRequest: () => request("/scheduling/my-request"),
+
+  /** Candidate: submit availability windows ({start, end, source_timezone}[], UTC ISO strings). */
+  submitAvailability: (requestId, windows) =>
+    request(`/scheduling/requests/${requestId}/availability`, {
+      method: "POST",
+      body: JSON.stringify({ windows }),
+    }),
+
+  /** Candidate: pick one feasible slot by id. */
+  selectSlot: (requestId, slotId) =>
+    request(`/scheduling/requests/${requestId}/select-slot`, {
+      method: "POST",
+      body: JSON.stringify({ slot_id: slotId }),
+    }),
+
+  /** Candidate: cancel their interview. */
+  cancelRequest: (requestId) => request(`/scheduling/requests/${requestId}/cancel`, { method: "POST" }),
+
+  /** Interviewer: their own pool profile, or null if never registered. */
+  getMyInterviewerProfile: () => request("/scheduling/interviewer/profile"),
+
+  /** Interviewer: create/update their pool profile. */
+  saveMyInterviewerProfile: (body) =>
+    request("/scheduling/interviewer/profile", { method: "PUT", body: JSON.stringify(body) }),
+
+  /** Interviewer: seats currently offered or accepted to them. */
+  myOffers: () => request("/scheduling/interviewer/offers"),
+
+  /** Interviewer: accept or decline one seat offer. */
+  respondToSeat: (interviewId, seatIndex, accept) =>
+    request(`/scheduling/interviews/${interviewId}/seats/${seatIndex}/respond`, {
+      method: "POST",
+      body: JSON.stringify({ accept }),
+    }),
+
+  /** Interviewer: back out of a seat already accepted. */
+  interviewerCancelSeat: (interviewId) =>
+    request(`/scheduling/interviews/${interviewId}/interviewer-cancel`, { method: "POST" }),
+
+  /** Recruiter/hiring_manager: the interviewer directory. */
+  listInterviewers: () => request("/scheduling/interviewers"),
+
+  /** Anyone: their own notification inbox (offers, confirmations, escalations, ...). */
+  myNotifications: () => request("/scheduling/notifications"),
 };
 
 export { ApiError };

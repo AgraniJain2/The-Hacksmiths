@@ -1,0 +1,47 @@
+.wrap {
+  max-width: 640px;
+}
+
+.header {
+  margin-bottom: var(--space-6);
+}
+
+.heading {
+  font-size: var(--text-2xl);
+}
+
+.subtitle {
+  color: var(--text-secondary);
+  margin-top: var(--space-1);
+}
+
+.card {
+  padding: var(--space-6);
+}
+
+.typesGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-2);
+}
+
+.typeChip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--surface-border);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.typeChip input {
+  accent-color: var(--accent);
+}
+
+.savedNote {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--success);
+}

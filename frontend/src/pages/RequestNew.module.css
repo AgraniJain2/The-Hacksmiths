@@ -1,0 +1,61 @@
+.wrap {
+  max-width: 720px;
+}
+
+.header {
+  margin-bottom: var(--space-6);
+}
+
+.heading {
+  font-size: var(--text-2xl);
+}
+
+.subtitle {
+  color: var(--text-secondary);
+  margin-top: var(--space-1);
+}
+
+.card {
+  padding: var(--space-6);
+}
+
+.sectionLabel {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: var(--space-6) 0 var(--space-3);
+}
+
+.sectionLabel:first-child {
+  margin-top: 0;
+}
+
+.successCard {
+  padding: var(--space-6);
+  text-align: center;
+}
+
+.successIcon {
+  color: var(--success);
+  margin: 0 auto var(--space-4);
+}
+
+.linkRow {
+  display: flex;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+}
+
+.linkRow .input {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.successActions {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: center;
+  margin-top: var(--space-5);
+}

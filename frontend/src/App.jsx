@@ -7,6 +7,13 @@ import Login from "./pages/Login";
 import AuthComplete from "./pages/AuthComplete";
 import Dashboard from "./pages/Dashboard";
 import GoogleConnection from "./pages/GoogleConnection";
+import RequestNew from "./pages/RequestNew";
+import RequestList from "./pages/RequestList";
+import RequestDetail from "./pages/RequestDetail";
+import InterviewerProfile from "./pages/InterviewerProfile";
+import InterviewerOffers from "./pages/InterviewerOffers";
+import Candidate from "./pages/Candidate";
+import Notifications from "./pages/Notifications";
 import NotFound from "./pages/NotFound";
 
 // Route map. Adding a new authenticated page? Nest it under the AppShell
@@ -25,6 +32,16 @@ export default function App() {
               <Route element={<AppShell />}>
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/settings/google" element={<GoogleConnection />} />
+                <Route path="/notifications" element={<Notifications />} />
+
+                <Route path="/requests/new" element={<RequestNew />} />
+                <Route path="/requests" element={<RequestList />} />
+                <Route path="/requests/:requestId" element={<RequestDetail />} />
+
+                <Route path="/interviewer/profile" element={<InterviewerProfile />} />
+                <Route path="/interviewer/offers" element={<InterviewerOffers />} />
+
+                <Route path="/candidate" element={<Candidate />} />
               </Route>
             </Route>
 
