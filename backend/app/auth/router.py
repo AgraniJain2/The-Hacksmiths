@@ -104,7 +104,7 @@ def callback(code: str, state: str, db: Session = Depends(get_db)):
         session_jwt,
         httponly=True,
         secure=settings.SESSION_COOKIE_SECURE,
-        samesite="lax",
+        samesite=settings.SESSION_COOKIE_SAMESITE,
         max_age=settings.SESSION_TTL_MINUTES * 60,
     )
     return redirect
@@ -147,5 +147,12 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 
 @auth_router.post("/logout")
 def logout(response: Response):
-    response.delete_cookie(settings.SESSION_COOKIE_NAME)
+    # Must match the attributes set_cookie used above - a delete_cookie with
+    # different secure/samesite doesn't overwrite the original in most
+    # browsers, so it'd look like logout worked while the cookie persisted.
+    response.delete_cookie(
+        settings.SESSION_COOKIE_NAME,
+        secure=settings.SESSION_COOKIE_SECURE,
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+    )
     return {"status": "logged_out"}

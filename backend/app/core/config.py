@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173"
     SESSION_COOKIE_NAME: str = "session"
     SESSION_COOKIE_SECURE: bool = True
+    # "lax" for same-site dev (localhost:5173 + localhost:8000 count as one
+    # site - port doesn't factor into it). Frontend and backend on two
+    # different *hosts* (e.g. two separate trycloudflare.com tunnel
+    # subdomains, or a real prod split) are cross-site to the browser, and a
+    # Lax cookie never gets attached to the frontend's fetch("/auth/me") -
+    # only to the OAuth redirect itself (a real navigation). That reads as
+    # "login succeeded, then no session" - set this to "none" (requires
+    # SESSION_COOKIE_SECURE=true, which SameSite=None requires anyway).
+    SESSION_COOKIE_SAMESITE: str = "lax"
     SESSION_TTL_MINUTES: int = 60
 
     @property
