@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from hacksmiths.scheduler.config import SchedulingConfig
-from hacksmiths.scheduler.feasibility import (
+from app.scheduling.config import SchedulingConfig
+from app.scheduling.feasibility import (
     feasible_interviewers_at_fixed_time,
     run_feasibility,
 )
-from hacksmiths.scheduler.pool import resolve_interviewer_pool
+from app.scheduling.pool import resolve_interviewer_pool
 
 UTC = timezone.utc
 
@@ -76,7 +76,7 @@ def test_insufficient_pool_short_circuits_feasibility(insufficient_pool):
 
 
 def test_empty_availability_is_reported(normal_single):
-    from hacksmiths.scheduler.models import CandidateAvailability
+    from app.scheduling.models import CandidateAvailability
 
     empty = CandidateAvailability(
         request_id=normal_single.request.request_id,
@@ -93,7 +93,7 @@ def test_empty_availability_is_reported(normal_single):
 
 
 def test_fixed_time_recompute_excludes_reserved_interviewers(seat_cascade_exhaustion):
-    from hacksmiths.scheduler.reservations import ReservationLedger
+    from app.scheduling.reservations import ReservationLedger
 
     scn = seat_cascade_exhaustion
     pool, result = _feasibility(scn)

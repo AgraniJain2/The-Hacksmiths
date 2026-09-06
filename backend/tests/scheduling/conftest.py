@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hacksmiths.scheduler.providers import fixtures
+from app.scheduling.providers import fixtures
 
 
 @pytest.fixture

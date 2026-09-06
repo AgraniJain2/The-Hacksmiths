@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from hacksmiths.scheduler.config import PoolPolicy, SeniorityMode, SkillMatchMode
-from hacksmiths.scheduler.pool import resolve_interviewer_pool
+from app.scheduling.config import PoolPolicy, SeniorityMode, SkillMatchMode
+from app.scheduling.pool import resolve_interviewer_pool
 
 
 def _ids(result):

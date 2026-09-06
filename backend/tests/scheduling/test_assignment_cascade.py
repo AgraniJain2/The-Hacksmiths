@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from hacksmiths.scheduler.assignment import PanelAssignmentAgent
-from hacksmiths.scheduler.config import AssignmentConfig, SchedulingConfig
-from hacksmiths.scheduler.pipeline import assign_panel, find_feasible_slots
-from hacksmiths.scheduler.reservations import ReservationLedger
-from hacksmiths.scheduler.state_machine import InterviewStateMachine
-from hacksmiths.scheduler.timeutils import buffered_interval
+from app.scheduling.assignment import PanelAssignmentAgent
+from app.scheduling.config import AssignmentConfig, SchedulingConfig
+from app.scheduling.pipeline import assign_panel, find_feasible_slots
+from app.scheduling.reservations import ReservationLedger
+from app.scheduling.state_machine import InterviewStateMachine
+from app.scheduling.timeutils import buffered_interval
 
 
 def _setup(scn, config=None):

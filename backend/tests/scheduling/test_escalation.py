@@ -4,14 +4,14 @@ from datetime import datetime, timezone
 
 import pytest
 
-from hacksmiths.scheduler.escalation import (
+from app.scheduling.escalation import (
     escalate_if_no_feasible_slot,
     escalate_to_manual_scheduling,
 )
-from hacksmiths.scheduler.feasibility import run_feasibility
-from hacksmiths.scheduler.models import FeasibilityResult
-from hacksmiths.scheduler.pool import resolve_interviewer_pool
-from hacksmiths.scheduler.providers import MockNotificationProvider
+from app.scheduling.feasibility import run_feasibility
+from app.scheduling.models import FeasibilityResult
+from app.scheduling.pool import resolve_interviewer_pool
+from app.scheduling.providers import MockNotificationProvider
 
 UTC = timezone.utc
 
@@ -48,7 +48,7 @@ def test_escalate_if_no_feasible_slot_escalates_on_empty():
         no_match_reason="insufficient interviewer pool: 1 eligible & active, 3 required",
         generated_at=datetime(2026, 9, 1, tzinfo=UTC),
     )
-    from hacksmiths.scheduler.providers.fixtures import insufficient_pool
+    from app.scheduling.providers.fixtures import insufficient_pool
 
     scn = insufficient_pool()
     request, escalated = escalate_if_no_feasible_slot(scn.request, empty, notifier)

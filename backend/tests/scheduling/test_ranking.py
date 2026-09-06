@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from hacksmiths.scheduler.assignment import rank_interviewers
-from hacksmiths.scheduler.models import InterviewerLoadSnapshot
-from hacksmiths.scheduler.providers import MockInterviewerLoadProvider
+from app.scheduling.assignment import rank_interviewers
+from app.scheduling.models import InterviewerLoadSnapshot
+from app.scheduling.providers import MockInterviewerLoadProvider
 
 UTC = timezone.utc
 AS_OF = datetime(2026, 9, 1, tzinfo=UTC)

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from hacksmiths.scheduler.pipeline import assign_panel, find_feasible_slots, run_happy_path
-from hacksmiths.scheduler.reservations import ReservationLedger
+from app.scheduling.pipeline import assign_panel, find_feasible_slots, run_happy_path
+from app.scheduling.reservations import ReservationLedger
 
 UTC = timezone.utc
 

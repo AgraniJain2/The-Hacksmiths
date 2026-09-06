@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from hacksmiths.scheduler.reservations import ReservationLedger
+from app.scheduling.reservations import ReservationLedger
 
 UTC = timezone.utc
 

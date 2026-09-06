@@ -4,8 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from hacksmiths.scheduler.models import FreeBusyBlock, Round, WorkingHours
-from hacksmiths.scheduler.timeutils import (
+from app.scheduling.models import FreeBusyBlock, Round, WorkingHours
+from app.scheduling.timeutils import (
     buffered_interval,
     ensure_utc,
     has_busy_conflict,

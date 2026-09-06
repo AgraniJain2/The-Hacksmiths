@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from hacksmiths.scheduler.assignment import PanelAssignmentAgent
-from hacksmiths.scheduler.config import SchedulingConfig
-from hacksmiths.scheduler.pipeline import assign_panel, find_feasible_slots
-from hacksmiths.scheduler.reservations import ReservationLedger
-from hacksmiths.scheduler.state_machine import (
+from app.scheduling.assignment import PanelAssignmentAgent
+from app.scheduling.config import SchedulingConfig
+from app.scheduling.pipeline import assign_panel, find_feasible_slots
+from app.scheduling.reservations import ReservationLedger
+from app.scheduling.state_machine import (
     BookingConflictError,
     InterviewStateMachine,
     InvalidTransitionError,
@@ -56,7 +56,7 @@ def test_create_interview_has_n_pending_seats(normal_single):
             reservations=ReservationLedger(), notifier=normal_single.notifier, config=config,
         ),
     )
-    from hacksmiths.scheduler.models import FeasibleSlot
+    from app.scheduling.models import FeasibleSlot
 
     slot = FeasibleSlot(
         slot_id="x", start=normal_single.now, end=normal_single.now,

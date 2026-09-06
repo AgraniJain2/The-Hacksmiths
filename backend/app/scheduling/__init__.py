@@ -15,11 +15,12 @@ Public surface (import from here):
 * State machine (steps 6 & 8) - ``InterviewStateMachine``,
   ``InvalidTransitionError``, ``BookingConflictError``
 * Orchestration - ``find_feasible_slots`` / ``assign_panel`` / ``run_happy_path``
-* Providers - ``scheduler.providers`` (interfaces + in-memory mocks)
+* Providers - ``scheduling.providers`` (interfaces + in-memory mocks)
 
-See ``Documentation/WORKFLOW.md`` for the workflow and ``SCHEDULER.md`` for the
-design rationale (feasibility vs. ranking split, seniority rule, working-hours
-precedence, reservation-at-offer locking, per-seat cascade).
+See ``Documentation/WORKFLOW.md`` for the workflow and
+``Documentation/SCHEDULER.md`` for the design rationale (feasibility vs.
+ranking split, seniority rule, working-hours precedence,
+reservation-at-offer locking, per-seat cascade).
 """
 
 from . import models

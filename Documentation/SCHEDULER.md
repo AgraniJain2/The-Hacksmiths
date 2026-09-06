@@ -1,14 +1,16 @@
 # Smart Interview Scheduler — core scheduling engine
 
-Location: `src/hacksmiths/scheduler/`. Pure Python + Pydantic, FastAPI-ready (every
-model in `scheduler.models` is a `BaseModel`). No module calls a real URL — all
-external dependencies go through the ABCs in `scheduler.providers.interfaces`,
-backed for now by in-memory mocks.
+Location: `backend/app/scheduling/`. Pure Python + Pydantic, FastAPI-ready
+(every model in `scheduling.models` is a `BaseModel`). No module calls a real
+URL — all external dependencies go through the ABCs in
+`scheduling.providers.interfaces`, backed for now by in-memory mocks. Real
+adapters (Calendar API, the SQLAlchemy-backed repositories from
+[DATA_MODEL.md](DATA_MODEL.md)) and the FastAPI router that wires them in are
+the next piece of work, not yet built — see [MODULE_GUIDE.md](MODULE_GUIDE.md).
 
 This package implements workflow **steps 4, 6, and the step-8 re-computations**
-(see [`Documentation/WORKFLOW.md`](Documentation/WORKFLOW.md)). Auth, the
-candidate-facing link pages, Google Calendar/Meet/Gmail, `.ics`, and the reminder
-job are owned elsewhere.
+(see [WORKFLOW.md](WORKFLOW.md)). Auth, the candidate-facing link pages,
+Google Calendar/Meet/Gmail, `.ics`, and the reminder job are owned elsewhere.
 
 ```
 models.py        data contract (candidate availability windows, feasible slots, seats, ...)
@@ -24,7 +26,8 @@ pipeline.py      find_feasible_slots(...) / assign_panel(...) / run_happy_path(.
 providers/       interfaces.py (ABCs) + mock_*.py (in-memory) + fixtures.py (6 scenarios)
 ```
 
-Run the tests: `uv run --group dev pytest` (54 tests, ~0.1s, no network).
+Run the tests: `cd backend && pytest tests/scheduling` (54 tests, ~0.1s, no
+network).
 
 ---
 
