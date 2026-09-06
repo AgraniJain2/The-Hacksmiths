@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # End-to-End Workflow
 
 This is the agreed shape of the product — the contract every module is built
@@ -6,6 +5,17 @@ against. This is the maintained, fully-explained version;
 [`workflow.txt`](../workflow.txt) (repo root) mirrors the same stages as a
 quick-glance ASCII diagram — if the two ever disagree, this file is right and
 `workflow.txt` needs updating to match.
+
+**Where the code lives:** stages 4, 6, and the step-8 re-computations have a
+dedicated, tested scheduling core at
+[`backend/app/scheduling/`](../backend/app/scheduling/) — pure Python,
+provider-interface-based, no direct Calendar/DB calls of its own. See
+[SCHEDULER.md](SCHEDULER.md) for its internal design (the feasibility/ranking
+split, the seniority-matching rule, working-hours precedence,
+reservation-at-offer locking, the per-seat cascade). Everything else below —
+auth, the request/profile/availability UIs, event creation, notifications,
+the reminder job — is owned directly by the FastAPI modules described in
+[MODULE_GUIDE.md](MODULE_GUIDE.md).
 
 **Revision history (interviewer pooling), so nobody's confused reading old
 context:**
@@ -50,50 +60,60 @@ flowchart TD
 ## Stage-by-stage
 
 ### 1. Setup & Auth — ✅ built, unchanged
-Google OAuth for every role (candidate, recruiter, hiring_manager,
-interviewer) — see [AUTH_MODULE.md](AUTH_MODULE.md). Finalized as the only
-auth method; not revisiting multi-auth support for this build.
+**Owner:** teammate (auth module). Google OAuth for every role (candidate,
+recruiter, hiring_manager, interviewer) — see [AUTH_MODULE.md](AUTH_MODULE.md).
+Finalized as the only auth method; not revisiting multi-auth support for this
+build.
 
 ### 2. Create Interview Request
-Recruiter defines: candidate email + timezone, interview type, required
-skills, required seniority, **number of panelists needed (N)**, duration,
-buffer. No panelist is named — the pool fills all N seats automatically in
-Stage 6. A hiring manager, if the round needs one, is still named explicitly
-— pooling applies only to the interviewer/panelist role.
+**Owner:** teammate (API + UI). Recruiter defines: candidate email +
+timezone, interview type, required skills, required seniority, **number of
+panelists needed (N)**, duration, buffer. No panelist is named — the pool
+fills all N seats automatically in Stage 6. A hiring manager, if the round
+needs one, is still named explicitly — pooling applies only to the
+interviewer/panelist role.
 
 ### 2B. Interviewer Pool Profile
-Every interviewer maintains: skills, seniority, qualified interview types,
-active/inactive toggle, **plus their timezone and working hours**
-(`working_hours_start`/`working_hours_end`, defaulting to 09:00–18:00 in
-their own timezone if never customized). The working-hours fields are new in
-this revision — without them, "check their calendar" only tells you they
-have no meeting booked, not that the time is reasonable for them.
+**Owner:** teammate (API + UI). Every interviewer maintains: skills,
+seniority, qualified interview types, active/inactive toggle, **plus their
+timezone and working hours** (`working_hours_start`/`working_hours_end`,
+defaulting to 09:00–18:00 in their own timezone if never customized). The
+working-hours fields are new in this revision — without them, "check their
+calendar" only tells you they have no meeting booked, not that the time is
+reasonable for them. This feeds the scheduling core's `InterviewerRepository`
+adapter directly.
 
 ### 3. Candidate Availability Collection
-Unchanged: candidate submits free windows in their own timezone via their
-invite link, before pool matching runs.
+**Owner:** teammate (API + UI). Unchanged: candidate submits free windows in
+their own timezone via their invite link, before pool matching runs. Feeds
+the scheduling core's `AvailabilityRepository` adapter.
 
 ### 4. Interviewer Pool Feasibility Check
-Filter the pool by skills/seniority/type/active, then for each candidate
-window, check every eligible interviewer against **three** conditions, all
-of which must hold:
+**Owner:** scheduling core — `pool.py` + `feasibility.py`. Filter the pool by
+skills/seniority/type/active, then for each candidate window, check every
+eligible interviewer against **three** conditions, all of which must hold:
 1. Calendar free/busy shows them free
 2. The time falls inside their configured working hours (converted through
    *their* timezone — never assume a shared timezone across the pool)
 3. It respects `buffer_minutes` around their adjacent calendar events
 
 A candidate window is feasible only if **at least N** interviewers pass all
-three checks — since Stage 6 needs to fill N seats, not just one.
+three checks — since Stage 6 needs to fill N seats, not just one. Feasibility
+here is deliberately **binary** — no scoring or ranking happens until Stage 6,
+once a single time is fixed.
 
 **Decision carried over:** if no window has enough coverage, surface that
 explicitly (which constraint is the blocker: too few qualified people, or
 everyone's just busy/outside hours) rather than a silent empty result.
 
 ### 5. Candidate Slot Selection
-Unchanged: candidate picks one exact time from the feasible list.
+**Owner:** teammate (UI) + scheduling core (validation). Unchanged: candidate
+picks one exact time from the feasible list; the core validates the chosen
+id is still in the feasible set before Stage 6 proceeds.
 
 ### 6. N-Seat Interviewer Assignment
-Once the candidate confirms a time:
+**Owner:** scheduling core — `assignment.py` (`PanelAssignmentAgent`, fully
+deterministic, no LLM anywhere). Once the candidate confirms a time:
 
 1. Recompute the eligible-and-feasible set live (calendar + working hours +
    buffer, same three checks as Stage 4, re-checked in case anything changed).
@@ -120,17 +140,22 @@ Once the candidate confirms a time:
 seats (never more offers out than seats needed), there's no multi-way race
 *within* one interview. The one race that's still real: two *different*
 interviews independently trying to offer the same top-ranked person
-overlapping times, moments apart — guarded by locking that interviewer's
-profile row at the moment any offer (initial or cascade) is created. See
-[DATA_MODEL.md](DATA_MODEL.md#interviewslotoffer-new--module-6).
+overlapping times, moments apart — guarded by the scheduling core's
+reservation ledger (`reservations.py`), which locks that interviewer's
+buffered time interval at the moment any offer (initial or cascade) is
+created. See [DATA_MODEL.md](DATA_MODEL.md#interviewslotoffer-new--module-6).
 
 ### 7. Event Creation & Dispatch
-Once all N seats are confirmed: create **one** calendar event (Meet link via
-`conferenceData`) with candidate + hiring manager (if any) + all N confirmed
-interviewers as attendees. Confirmation email with `.ics` fallback to everyone.
+**Owner:** teammate. Once all N seats are confirmed: create **one** calendar
+event (Meet link via `conferenceData`) with candidate + hiring manager (if
+any) + all N confirmed interviewers as attendees. Confirmation email with
+`.ics` fallback to everyone. The scheduling core exposes
+`verify_ready_to_finalize` as the final conflict re-check gating this step.
 
 ### 8. Post-Booking & Exception Handling
-Reminders before the interview. Cancellation/reschedule, both parties:
+**Owner:** teammate (reminder job) + scheduling core (`state_machine.py`) for
+the cancel/reschedule logic itself. Reminders before the interview.
+Cancellation/reschedule, both parties:
 
 - **Candidate cancels or requests a reschedule:** all N confirmed seats are
   released (notified it's off), flow restarts from Stage 3 with new/updated
@@ -159,72 +184,3 @@ booking (Stage 5), configurable buffer time (Stage 4), timezone-aware
 scheduling for both candidate and interviewer (Stages 3, 4, 6), and
 skill/seniority-based intelligent interviewer selection with load balancing
 (Stages 2B, 4, 6).
-=======
-# Smart Interview Scheduler — Workflow (source of truth)
-
-This is the maintained description of the end-to-end flow. The scheduling **core**
-(steps 4, 5-validation, 6, and the step-8 re-computations) lives in
-`src/hacksmiths/scheduler/`; see [`../SCHEDULER.md`](../SCHEDULER.md) for its
-internals. Steps 1-3, 5-UI, 7, and the reminder job are owned by other parts of
-the project.
-
-```mermaid
-flowchart TD
-    A[1. Setup & Auth<br/>Google OAuth + RBAC, Calendar/Gmail perms] --> B
-    B[2. Create Interview Request<br/>type, skills, seniority, N panelists,<br/>duration, buffer, candidate, optional hiring manager<br/>NO named panelists] --> D
-    P[2B. Interviewer Pool Profile<br/>skills, seniority, qualified types, active toggle,<br/>timezone + working hours] --> D
-    B --> C[3. Candidate Availability Collection<br/>signed link -> candidate submits free windows in their tz]
-    C --> D[4. Interviewer Pool Feasibility Check<br/>filter pool by skills+seniority+type+active<br/>fetch Free/Busy; per candidate window keep interviewers who are<br/>a calendar-free  b within THEIR working hours  c buffer-respecting<br/>keep windows with >= N passing  BINARY feasibility]
-    D -->|no window has >= N| E[Escalate to recruiter<br/>manual_scheduling_required]
-    D -->|feasible slots| F[5. Candidate Slot Selection<br/>candidate views feasible slots in local tz, picks exactly one]
-    F --> G[6. N-Seat Interviewer Assignment<br/>recompute eligible+feasible LIVE for the fixed time<br/>rank: 1 lowest rolling 7-day confirmed count  2 least recently assigned<br/>offer TOP N in PARALLEL, one per seat, to N distinct people<br/>reserve each interviewer row at offer creation]
-    G -->|seat accepted| H{all N seats accepted?}
-    G -->|declined / timeout| I[re-rank remaining pool for THAT SEAT ONLY<br/>offer next person]
-    I --> G
-    G -->|pool exhausted for a seat| E
-    H -->|yes| J[7. Event Creation & Dispatch<br/>Google Meet link, ONE calendar event for<br/>candidate + hiring manager + N interviewers, .ics emails]
-    J --> K[8. Post-Booking & Exceptions<br/>reminders job<br/>candidate cancels/reschedules -> release ALL N seats, restart at 3<br/>one interviewer cancels -> release THAT seat, re-run 6 for it only]
-    K -->|interviewer cancel, pool exhausted| E
-```
-
-## Stage-by-stage
-
-| # | Stage | Owner | Notes / decisions |
-|---|---|---|---|
-| 1 | Setup & Auth | teammate | **Google OAuth only** (RBAC by role). No email/password, no SSO alternative — a consciously accepted narrowing of the brief. Calendar + Gmail scopes collected here. |
-| 2 | Create Interview Request | teammate UI → core models | Recruiter defines `interview_type`, `required_skills`, `seniority`, `panelists_required` (N), duration + buffer (on `Round`), candidate email + timezone. **No named panelists** — all N seats auto-filled in step 6. A **hiring manager** may be named explicitly (`hiring_manager_email`); they are added to the event but **not pooled or availability-checked**. |
-| 2B | Interviewer Pool Profile | teammate | Each interviewer declares skills, seniority, qualified interview types, an **active/inactive** toggle, and timezone + working hours (default 09:00-18:00 in their own tz). Feeds `InterviewerRepository`. |
-| 3 | Candidate Availability Collection | teammate | Unique signed link; candidate logs in and submits free time windows **in their own timezone**. Persisted as UTC `AvailabilityWindow`s via `AvailabilityRepository`. **This replaces the old recruiter "scheduling window" entirely** — the candidate's windows are the only time bound. |
-| 4 | Interviewer Pool Feasibility Check | **core** — `pool.py` + `feasibility.py` | `resolve_interviewer_pool` filters the directory by active + interview type + skill (default: all required) + seniority (default: at-least). Then for each start time inside each candidate window, count interviewers who are individually (a) calendar-free, (b) inside **their own** working hours, (c) buffer-respecting. Keep the slot if `>= N`. **Binary** — no ranking here. Nothing feasible → escalate. |
-| 5 | Candidate Slot Selection | teammate UI + **core validation** | Candidate picks exactly one feasible slot. The core (`assign_panel`) validates the chosen id is in the feasible set before proceeding. |
-| 6 | N-Seat Interviewer Assignment | **core** — `assignment.py` (`PanelAssignmentAgent`, fully deterministic, no LLM) | Recompute who is still feasible **live** at the fixed time (same 3 checks + reservation ledger). Rank by `(rolling 7-day confirmed count ASC, last-assigned ASC, id)`. Offer the top N seats **in parallel**, one per seat, to N distinct people; **reserve each interviewer's row at the moment the offer is created** (interval-overlap lock, so nobody is double-booked across two interviews). Per seat: accepted → filled; declined / offer timeout → release, re-rank the remainder **for that seat only**, offer next; pool exhausted for a seat → escalate. All N accepted → `panel_complete`. |
-| 7 | Event Creation & Dispatch | teammate | Meet link via `conferenceData` on `events.insert`; one calendar event for candidate + hiring manager + N interviewers; confirmation emails with `.ics`. The core exposes `verify_ready_to_finalize` (final conflict re-check) as the hand-off gate. |
-| 8 | Post-Booking & Exception Handling | teammate job + **core** — `state_machine.py` | Reminder cron (teammate). **Candidate cancel/reschedule** (`candidate_cancel` / `candidate_reschedule`): release ALL N seats + reservations, notify, reset the request to `collecting_availability` and restart at step 3. **One interviewer cancels after accepting** (`interviewer_cancel`): release just that seat, re-run step 6's cascade for that seat only at the same fixed time excluding them; the candidate's time and the other seats are untouched unless that seat's pool is exhausted (→ escalate). |
-
-## Mapping to the hackathon minimum deliverables
-
-| Deliverable | Where |
-|---|---|
-| Interface for creating an interview request | step 2 (teammate) + `InterviewRequest` model |
-| Calendar availability checks for all required internal participants | step 4 — `feasibility.py`, per-interviewer free/busy + own working hours + buffer |
-| Candidate availability collection | step 3 (teammate) + `CandidateAvailability` / `AvailabilityRepository` |
-| Automated slot recommendation and booking | steps 4-6 — feasible slots (4), candidate pick (5), deterministic N-seat fill (6) |
-| Calendar event creation with interview details | step 7 (teammate); core gates it with `verify_ready_to_finalize` |
-| Automated candidate and interviewer communications | `NotificationProvider` hooks (seat offer / filled / released / panel complete / cancelled / recruiter escalation); email/SMS bodies are teammate-owned |
-| Conflict detection and rescheduling support | `ReservationLedger` (reserve-at-offer, interval overlap) + `state_machine.py` reschedule / interviewer-cancel paths |
-| *Bonus:* intelligent interviewer selection | step 6 ranking (load balancing + round-robin) |
-| *Bonus:* time-zone-aware scheduling | every check converts through the owner's IANA timezone |
-| *Bonus:* configurable buffer between interviews | `Round.buffer_minutes_before/after`, applied to busy checks and reservations |
-
-## Consciously accepted gaps (this version)
-
-- The recruiter's and the named hiring manager's own calendars are **not** checked
-  against the chosen time — only the interviewer pool is.
-- **Single auth method** (Google OAuth), despite the brief mentioning multiple.
-- `WorkingHours` is time-of-day only — **no weekday map**, so weekends aren't
-  excluded by the engine.
-- No sequence diagrams, audit/analytics dashboard, SMS, or Zoom.
-- No automatic window expansion / buffer relaxation — escalation is terminal for
-  the automated pipeline; any retry is an explicit recruiter action.
-- No LLM anywhere in the pipeline — interviewer selection is deterministic ranking.
->>>>>>> backend
