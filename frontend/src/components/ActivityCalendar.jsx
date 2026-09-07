@@ -1,8 +1,6 @@
 import styles from "./ActivityCalendar.module.css";
 import { IconCalendar } from "./icons";
-
-const DAY_FORMAT = { weekday: "short", month: "short", day: "numeric" };
-const TIME_FORMAT = { hour: "numeric", minute: "2-digit" };
+import { formatDay, formatTime } from "../lib/datetime";
 
 function dayKey(date) {
   return date.toDateString();
@@ -44,11 +42,11 @@ export default function ActivityCalendar({ events, emptyLabel = "Nothing schedul
         <div className={styles.groups}>
           {groups.map((group) => (
             <div key={group.key} className={styles.group}>
-              <div className={styles.dayLabel}>{group.date.toLocaleDateString(undefined, DAY_FORMAT)}</div>
+              <div className={styles.dayLabel}>{formatDay(group.date)}</div>
               <div className={styles.items}>
                 {group.items.map((event) => (
                   <div key={event.id} className={styles.item}>
-                    <span className={styles.time}>{event.start.toLocaleTimeString(undefined, TIME_FORMAT)}</span>
+                    <span className={styles.time}>{formatTime(event.start)}</span>
                     <span className={styles.itemBody}>
                       <span className={styles.itemTitle}>{event.title}</span>
                       {event.subtitle && <span className={styles.itemSubtitle}>{event.subtitle}</span>}

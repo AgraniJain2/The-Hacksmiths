@@ -163,7 +163,7 @@ def _create_event(db, row, interview, calendar_service, attendee_emails: List[st
         }
         result = (
             calendar_service.events()
-            .insert(calendarId="primary", body=body, conferenceDataVersion=1, sendUpdates="none")
+            .insert(calendarId="primary", body=body, conferenceDataVersion=1, sendUpdates="all")
             .execute()
         )
     except HttpError as exc:
@@ -204,7 +204,7 @@ def _sync_event_attendees(db, row, interview, calendar_service, attendee_emails:
             calendarId="primary",
             eventId=row.calendar_event_id,
             body={"attendees": [{"email": e} for e in attendee_emails]},
-            sendUpdates="none",
+            sendUpdates="all",
         ).execute()
     except HttpError as exc:
         logger.warning("events.patch (attendee sync) failed for interview %s: %s", row.id, exc)
@@ -266,7 +266,7 @@ def cancel_event(
     if calendar_service is not None:
         try:
             calendar_service.events().delete(
-                calendarId="primary", eventId=event_id, sendUpdates="none"
+                calendarId="primary", eventId=event_id, sendUpdates="all"
             ).execute()
         except HttpError as exc:
             # 410 Gone means someone already deleted it (e.g. manually) -
@@ -300,7 +300,7 @@ def remove_attendee_from_event(db: Session, row: InterviewRow, departing_email: 
         remaining = [a for a in event.get("attendees", []) if a.get("email") != departing_email]
         calendar_service.events().patch(
             calendarId="primary", eventId=row.calendar_event_id,
-            body={"attendees": remaining}, sendUpdates="none",
+            body={"attendees": remaining}, sendUpdates="all",
         ).execute()
     except HttpError as exc:
         logger.warning("Removing %s from interview %s's event failed: %s", departing_email, row.id, exc)

@@ -609,6 +609,58 @@ def test_double_submitting_select_slot_is_rejected_not_a_silent_double_run():
     assert "not awaiting a slot selection" in resp2.json()["detail"]
 
 
+def test_resubmitting_availability_once_a_panel_is_assigning_is_rejected():
+    """Same Module 5 edge case as the select-slot test above, for
+    `submit_availability`'s own guard: a stale/duplicate availability
+    submission (stale tab, browser back button) landing after the candidate
+    already picked a slot must not silently reset `status` back to a
+    request-level value while a panel's `seats_json` is still in place -
+    live in dev.db this produced a row `_row_to_interview` couldn't
+    reconstruct, 500-ing every later GET on the request."""
+    as_(RECRUITER)
+    resp = client.post(
+        "/scheduling/requests",
+        json={
+            "interview_type": "TECHNICAL_ROUND_1", "required_skills": ["python"], "seniority": "MID",
+            "panelists_required": 1, "candidate_name": "Resubmitter",
+            "candidate_email": "resubmitter@example.com", "candidate_timezone": "UTC",
+        },
+    )
+    request_id = resp.json()["request"]["request_id"]
+
+    as_(INTERVIEWER)
+    client.put(
+        "/scheduling/interviewer/profile",
+        json={
+            "skills": ["python"], "seniority": "SENIOR", "interview_types": ["TECHNICAL"],
+            "timezone": "UTC", "working_hours_start": "00:00", "working_hours_end": "23:59", "active": True,
+        },
+    )
+
+    as_(FakeUser("user-resubmitter", "resubmitter@example.com", "Resubmitter", "candidate"))
+    resp = client.post(
+        f"/scheduling/requests/{request_id}/availability",
+        json={"windows": [{"start": "2026-09-10T04:00:00Z", "end": "2026-09-10T11:00:00Z"}]},
+    )
+    slot_id = resp.json()["feasibility"]["feasible_slots"][0]["slot_id"]
+    resp = client.post(f"/scheduling/requests/{request_id}/select-slot", json={"slot_id": slot_id})
+    assert resp.status_code == 200, resp.text
+
+    # The (now stale) availability form fires again after the panel is
+    # already being assigned.
+    resp2 = client.post(
+        f"/scheduling/requests/{request_id}/availability",
+        json={"windows": [{"start": "2026-09-11T04:00:00Z", "end": "2026-09-11T11:00:00Z"}]},
+    )
+    assert resp2.status_code == 400
+    assert "not collecting availability" in resp2.json()["detail"]
+
+    # And the request must still be readable afterwards - not left crashing
+    # every subsequent GET.
+    resp3 = client.get(f"/scheduling/requests/{request_id}")
+    assert resp3.status_code == 200, resp3.text
+
+
 def test_candidate_can_cancel_out_of_manual_scheduling_required(monkeypatch):
     """Phase 6: found reachable and previously crashed with an unhandled
     InvalidTransitionError - a candidate's request escalated to

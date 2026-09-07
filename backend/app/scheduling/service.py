@@ -93,7 +93,7 @@ def _row_to_request(row: InterviewRow) -> InterviewRequest:
         panelists_required=row.panelists_required or 1,
         hiring_manager_email=row.hiring_manager_email,
         status=row.status,  # type: ignore[arg-type]
-        created_at=row.created_at,
+        created_at=ensure_utc(row.created_at),
     )
 
 
@@ -108,8 +108,35 @@ def _row_to_round(row: InterviewRow) -> Round:
     )
 
 
+_INTERVIEW_STATUSES = {"assigning_panel", "panel_complete", "manual_scheduling_required", "cancelled"}
+
+
 def _row_to_interview(row: InterviewRow) -> Optional[Interview]:
-    if not row.seats_json:
+    # Defensive, not just the "no interview yet" fast path: a row can end up
+    # with `seats_json` still populated while `confirmed_start_utc`/`_end`
+    # are `None` and `status` back at a *request*-level value (e.g.
+    # "awaiting_candidate_selection") - seen live from a stale/duplicate
+    # `submit_availability` call landing after a panel was already being
+    # assigned, without going through `candidate_reschedule`'s clearing.
+    # Building an `Interview` out of that mix used to raise an uncaught
+    # `pydantic.ValidationError`, 500-ing every subsequent GET on this
+    # request (the dashboard, request detail, candidate page - see this
+    # exact class of bug called out in
+    # tests/scheduling_service/test_cancel_reschedule.py). Treat it the same
+    # as "no interview exists yet," matching that established contract,
+    # rather than crashing the page.
+    if (
+        not row.seats_json
+        or row.confirmed_start_utc is None
+        or row.confirmed_end_utc is None
+        or row.status not in _INTERVIEW_STATUSES
+    ):
+        if row.seats_json:
+            logger.warning(
+                "Inconsistent interview row %s (status=%r, confirmed_start_utc=%r) - "
+                "treating as no interview rather than raising",
+                row.id, row.status, row.confirmed_start_utc,
+            )
         return None
     seats = [InterviewSeat(**s) for s in row.seats_json]
     return Interview(
@@ -118,12 +145,12 @@ def _row_to_interview(row: InterviewRow) -> Optional[Interview]:
         candidate_id=row.candidate_email or "",
         interview_type=row.interview_type or "",
         hiring_manager_email=row.hiring_manager_email,
-        slot_start=row.confirmed_start_utc,
-        slot_end=row.confirmed_end_utc,
+        slot_start=ensure_utc(row.confirmed_start_utc),
+        slot_end=ensure_utc(row.confirmed_end_utc),
         seats=seats,
         status=row.status,  # type: ignore[arg-type]
-        created_at=row.created_at,
-        updated_at=row.updated_at or row.created_at,
+        created_at=ensure_utc(row.created_at),
+        updated_at=ensure_utc(row.updated_at or row.created_at),
         calendar_event_id=row.calendar_event_id,
         meet_link=row.meeting_link,
     )
@@ -280,6 +307,20 @@ class SchedulingService:
         self, request_id: str, windows: List[AvailabilityWindow]
     ) -> Tuple[InterviewRequest, FeasibilityOutcome]:
         row = self._get_row(request_id)
+        # Same double-submit guard `select_slot` already has (MODULE_GUIDE.md
+        # Module 5 edge case): a stray re-submit of the availability form
+        # (stale tab, browser back/forward, a retried request) landing after
+        # a panel is already being assigned must not silently overwrite
+        # `status` back to a request-level value while leaving that panel's
+        # `seats_json`/`confirmed_start_utc` in place - that combination is
+        # exactly what `_row_to_interview` otherwise has to defend against
+        # after the fact. `candidate_reschedule` is the one legitimate way
+        # back to "collecting_availability" once a panel exists, and it
+        # always resets status to exactly that before calling here.
+        if row.status != "collecting_availability":
+            raise ValueError(
+                f"request {request_id} is {row.status!r}, not collecting availability"
+            )
         request = _row_to_request(row)
         round_ = _row_to_round(row)
         try:
@@ -539,6 +580,17 @@ class SchedulingService:
             row.confirmed_end_utc = None
             row.feasibility_json = None
             row.reminder_sent_at = None
+            # _persist_interview() above just wrote the old (now-cancelled)
+            # interview's seats back onto this row - must be cleared too, or
+            # _row_to_interview() later finds a non-empty seats_json paired
+            # with slot_start/slot_end=None and a *request*-level status
+            # (collecting_availability/awaiting_candidate_selection, not a
+            # valid Interview status), and crashes trying to build an
+            # Interview out of that mix. No interview exists for this
+            # request until a new panel is assigned - seats_json should say
+            # exactly that (None), matching _row_to_interview's own
+            # "not row.seats_json -> no interview" contract.
+            row.seats_json = None
             row.updated_at = datetime.now(UTC)
             self.db.commit()
         except Exception:

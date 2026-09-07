@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import { INTERVIEW_TYPES, SENIORITY_LEVELS } from "../lib/constants";
+import { INTERVIEW_TYPES, SENIORITY_LEVELS, SKILLS } from "../lib/constants";
+import { TIMEZONES, browserTimezone } from "../lib/timezones";
 import { IconCheck, IconSparkle } from "../components/icons";
 import styles from "./RequestNew.module.css";
 
 const initial = {
   interview_type: INTERVIEW_TYPES[1],
-  required_skills: "",
+  required_skills: [],
   seniority: "MID",
   panelists_required: 1,
   duration_minutes: 60,
@@ -16,7 +17,7 @@ const initial = {
   hiring_manager_email: "",
   candidate_name: "",
   candidate_email: "",
-  candidate_timezone: "",
+  candidate_timezone: browserTimezone(),
 };
 
 export default function RequestNew() {
@@ -30,6 +31,15 @@ export default function RequestNew() {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  function toggleSkill(s) {
+    setForm((f) => ({
+      ...f,
+      required_skills: f.required_skills.includes(s)
+        ? f.required_skills.filter((x) => x !== s)
+        : [...f.required_skills, s],
+    }));
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setBusy(true);
@@ -37,10 +47,7 @@ export default function RequestNew() {
     try {
       const body = {
         interview_type: form.interview_type,
-        required_skills: form.required_skills
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
+        required_skills: form.required_skills,
         seniority: form.seniority,
         panelists_required: Number(form.panelists_required),
         duration_minutes: Number(form.duration_minutes),
@@ -152,17 +159,20 @@ export default function RequestNew() {
             </select>
           </div>
           <div className="field field-span-2">
-            <label className="field-label" htmlFor="skills">
-              Required skills
-            </label>
-            <input
-              id="skills"
-              className="input"
-              placeholder="python, system-design, algorithms"
-              value={form.required_skills}
-              onChange={(e) => set("required_skills", e.target.value)}
-            />
-            <span className="field-hint">Comma-separated. The panel must cover every one.</span>
+            <label className="field-label">Required skills</label>
+            <div className={styles.typesGrid}>
+              {SKILLS.map((s) => (
+                <label key={s} className={styles.typeChip}>
+                  <input
+                    type="checkbox"
+                    checked={form.required_skills.includes(s)}
+                    onChange={() => toggleSkill(s)}
+                  />
+                  {s}
+                </label>
+              ))}
+            </div>
+            <span className="field-hint">Pick every skill the panel must cover.</span>
           </div>
           <div className="field">
             <label className="field-label" htmlFor="panelists">
@@ -256,15 +266,20 @@ export default function RequestNew() {
             <label className="field-label" htmlFor="cand_tz">
               Candidate timezone
             </label>
-            <input
+            <select
               id="cand_tz"
               required
-              className="input"
-              placeholder="Asia/Kolkata"
+              className="select"
               value={form.candidate_timezone}
               onChange={(e) => set("candidate_timezone", e.target.value)}
-            />
-            <span className="field-hint">IANA name — ask the candidate, or use their city's zone.</span>
+            >
+              {TIMEZONES.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
+            <span className="field-hint">Ask the candidate, or use their city's zone.</span>
           </div>
         </div>
 

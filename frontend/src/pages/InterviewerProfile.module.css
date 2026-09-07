@@ -39,9 +39,3 @@
 .typeChip input {
   accent-color: var(--accent);
 }
-
-.savedNote {
-  margin-top: var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--success);
-}

@@ -156,6 +156,19 @@ def test_candidate_reschedule_deletes_old_event_and_recomputes_feasibility(db, m
     row = db.query(InterviewRow).filter_by(id=request_id).first()
     assert row.calendar_event_id is None  # cleared, not left pointing at a deleted event
     assert row.meeting_link is None
+    assert row.seats_json is None  # the old panel's seats must not linger either
+
+    # Regression: _persist_interview() writes the old (cancelled) interview's
+    # seats onto the row; if they're left in place alongside slot_start/end
+    # cleared to None and a request-level status, get_interview_for_request
+    # (called by every GET on this request from here on - the dashboard, the
+    # request detail page, the candidate page) raises an uncaught
+    # pydantic.ValidationError trying to rebuild an Interview from that
+    # inconsistent mix, surfacing to the browser as a bare 500 with no CORS
+    # header ("Failed to fetch", not a readable error). No interview exists
+    # for this request until a new panel is assigned - this must return None
+    # cleanly, not raise.
+    assert svc.get_interview_for_request(request_id) is None
 
 
 def test_interviewer_cancel_removes_the_attendee_immediately(db, monkeypatch):

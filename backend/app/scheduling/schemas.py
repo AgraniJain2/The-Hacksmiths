@@ -11,10 +11,19 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import List, Literal, Optional
+from zoneinfo import available_timezones
 
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from .models import FeasibilityResult, Interview, InterviewRequest, Round
+
+_VALID_TIMEZONES = available_timezones()
+
+
+def _check_timezone(value: str) -> str:
+    if value not in _VALID_TIMEZONES:
+        raise ValueError(f"{value!r} is not a recognised IANA timezone name")
+    return value
 
 INTERVIEW_TYPES = ["SCREENING", "TECHNICAL_ROUND_1", "TECHNICAL_ROUND_2", "MANAGERIAL", "HR"]
 
@@ -44,6 +53,8 @@ class CreateRequestBody(BaseModel):
     candidate_name: str = Field(min_length=1)
     candidate_email: EmailStr
     candidate_timezone: str = Field(min_length=1)
+
+    _validate_candidate_timezone = field_validator("candidate_timezone")(_check_timezone)
 
 
 class CreateRequestResponse(BaseModel):
@@ -85,6 +96,8 @@ class InterviewerProfileBody(BaseModel):
     working_hours_start: str = "09:00"
     working_hours_end: str = "18:00"
     active: bool = True
+
+    _validate_timezone = field_validator("timezone")(_check_timezone)
 
     @model_validator(mode="after")
     def _working_hours_not_inverted(self) -> "InterviewerProfileBody":

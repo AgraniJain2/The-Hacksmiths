@@ -77,8 +77,15 @@ def exchange_code(code: str) -> Credentials:
 
 
 def verify_id_token(id_token_str: str) -> dict:
+    # clock_skew_in_seconds guards against exactly what it sounds like: the
+    # underlying jwt.decode() rejects a token whose iat/exp is even one
+    # second ahead of *this machine's* clock relative to Google's, with zero
+    # tolerance by default. A dev machine's clock doesn't need to be
+    # noticeably wrong for that race to lose sometimes and win other times -
+    # this is the actual cause of an intermittent (not consistent) 500 on
+    # /auth/google/callback. 10s matches Google's own recommended tolerance.
     return google_id_token.verify_oauth2_token(
-        id_token_str, GoogleAuthRequest(), settings.GOOGLE_CLIENT_ID
+        id_token_str, GoogleAuthRequest(), settings.GOOGLE_CLIENT_ID, clock_skew_in_seconds=10
     )
 
 

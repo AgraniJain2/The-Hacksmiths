@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import StatusPill from "../components/StatusPill";
 import Spinner from "../components/Spinner";
 import { IconAlert, IconCalendar, IconCheck } from "../components/icons";
+import { formatDateTime } from "../lib/datetime";
 import styles from "./RequestDetail.module.css";
 
 const CANCELLABLE_STATUSES = new Set([
@@ -97,7 +98,7 @@ export default function RequestDetail() {
         <div className={styles.bookedCard}>
           <IconCheck width={20} height={20} className={styles.bookedIcon} />
           <div>
-            <p className={styles.bookedTitle}>Booked — {new Date(interview.slot_start).toLocaleString()}</p>
+            <p className={styles.bookedTitle}>Booked — {formatDateTime(interview.slot_start)}</p>
             {interview.meet_link ? (
               <a href={interview.meet_link} target="_blank" rel="noreferrer" className={styles.bookedLink}>
                 <IconCalendar width={14} height={14} style={{ marginRight: 4 }} />
@@ -135,7 +136,7 @@ export default function RequestDetail() {
             <div className={styles.slotList}>
               {feasibility.feasible_slots.map((s) => (
                 <div key={s.slot_id} className={styles.slotRow}>
-                  <span>{new Date(s.start).toLocaleString()}</span>
+                  <span>{formatDateTime(s.start)}</span>
                   <span className="text-muted">{s.feasible_count} eligible</span>
                 </div>
               ))}
@@ -149,7 +150,7 @@ export default function RequestDetail() {
         {interview && (
           <div className={`glass-card ${styles.card}`}>
             <p className={styles.cardTitle}>
-              Panel — {new Date(interview.slot_start).toLocaleString()}
+              Panel — {formatDateTime(interview.slot_start)}
             </p>
             {interview.seats.map((seat) => (
               <div key={seat.seat_index} className={styles.seatRow}>

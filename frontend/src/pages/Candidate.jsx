@@ -5,6 +5,7 @@ import Spinner from "../components/Spinner";
 import StatusPill from "../components/StatusPill";
 import ActivityCalendar from "../components/ActivityCalendar";
 import { IconAlert, IconCheck } from "../components/icons";
+import { formatDateTime } from "../lib/datetime";
 import styles from "./Candidate.module.css";
 
 function emptyWindow() {
@@ -193,7 +194,7 @@ export default function Candidate() {
           <div className={styles.slotList}>
             {feasibility.feasible_slots.map((s) => (
               <button key={s.slot_id} className={styles.slotButton} disabled={busy} onClick={() => pickSlot(s.slot_id)}>
-                <span>{new Date(s.start).toLocaleString()}</span>
+                <span>{formatDateTime(s.start)}</span>
                 <span className="btn btn-outline btn-sm">Select</span>
               </button>
             ))}
@@ -223,7 +224,7 @@ export default function Candidate() {
             {request.status === "panel_complete" ? "You're booked" : "Confirming your interviewers…"}
           </h2>
           <p className="text-secondary" style={{ marginTop: "0.5rem" }}>
-            {new Date(interview.slot_start).toLocaleString()}
+            {formatDateTime(interview.slot_start)}
             <br />
             {request.status === "panel_complete"
               ? "Your panel is fully confirmed."

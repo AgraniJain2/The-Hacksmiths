@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import StatusPill from "../components/StatusPill";
 import Spinner from "../components/Spinner";
+import { formatDateTime } from "../lib/datetime";
 import styles from "./InterviewerOffers.module.css";
 
 export default function InterviewerOffers() {
@@ -70,7 +71,7 @@ export default function InterviewerOffers() {
               <div key={key} className={`glass-card ${styles.card}`}>
                 <div className={styles.info}>
                   <div className={styles.type}>{interview.interview_type.replaceAll("_", " ")}</div>
-                  <div className={styles.time}>{new Date(interview.slot_start).toLocaleString()}</div>
+                  <div className={styles.time}>{formatDateTime(interview.slot_start)}</div>
                 </div>
                 <StatusPill status={seat.status} kind="seat" />
                 <div className={styles.actions}>

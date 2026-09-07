@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import GoogleConnectionCard from "../components/GoogleConnectionCard";
 import ActivityCalendar from "../components/ActivityCalendar";
+import MonthCalendar from "../components/MonthCalendar";
 import StatusPill from "../components/StatusPill";
 import { IconAlert } from "../components/icons";
 import { ROLE_LABELS, initials } from "../components/AppShell";
@@ -208,6 +209,15 @@ export default function Dashboard() {
           <InterviewerQuickActions offerCount={interviewerActivity.offerCount} />
         ) : (
           <StaffQuickActions />
+        )}
+
+        {!isInterviewer && (
+          <div className={styles.calendarSpan}>
+            <MonthCalendar
+              events={activity.events}
+              emptyLabel={activity.loading ? "Loading…" : "No confirmed interviews coming up."}
+            />
+          </div>
         )}
 
         <div className={styles.calendarSpan}>

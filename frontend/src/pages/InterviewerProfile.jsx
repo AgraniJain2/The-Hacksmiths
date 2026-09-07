@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { INTERVIEWER_QUALIFICATION_TYPES, SENIORITY_LEVELS, SKILLS } from "../lib/constants";
+import { TIMEZONES, browserTimezone } from "../lib/timezones";
 import Spinner from "../components/Spinner";
 import styles from "./InterviewerProfile.module.css";
 
@@ -15,11 +17,11 @@ const empty = {
 };
 
 export default function InterviewerProfile() {
+  const navigate = useNavigate();
   const [form, setForm] = useState(empty);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     api
@@ -36,10 +38,7 @@ export default function InterviewerProfile() {
             active: p.active,
           });
         } else {
-          setForm((f) => ({
-            ...f,
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
-          }));
+          setForm((f) => ({ ...f, timezone: browserTimezone() }));
         }
       })
       .catch((err) => setError(err.message))
@@ -48,7 +47,6 @@ export default function InterviewerProfile() {
 
   function set(key, value) {
     setForm((f) => ({ ...f, [key]: value }));
-    setSaved(false);
   }
 
   function toggleType(t) {
@@ -58,7 +56,6 @@ export default function InterviewerProfile() {
         ? f.interview_types.filter((x) => x !== t)
         : [...f.interview_types, t],
     }));
-    setSaved(false);
   }
 
   function toggleSkill(s) {
@@ -66,7 +63,6 @@ export default function InterviewerProfile() {
       ...f,
       skills: f.skills.includes(s) ? f.skills.filter((x) => x !== s) : [...f.skills, s],
     }));
-    setSaved(false);
   }
 
   async function handleSubmit(e) {
@@ -85,7 +81,7 @@ export default function InterviewerProfile() {
         working_hours_end: form.working_hours_end,
         active: form.active,
       });
-      setSaved(true);
+      navigate("/dashboard");
     } catch (err) {
       setError(err.message || "Couldn't save your profile.");
     } finally {
@@ -137,7 +133,13 @@ export default function InterviewerProfile() {
             <label className="field-label" htmlFor="tz">
               Timezone
             </label>
-            <input id="tz" className="input" placeholder="Asia/Kolkata" value={form.timezone} onChange={(e) => set("timezone", e.target.value)} />
+            <select id="tz" className="select" value={form.timezone} onChange={(e) => set("timezone", e.target.value)}>
+              {TIMEZONES.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="field">
@@ -184,7 +186,6 @@ export default function InterviewerProfile() {
             {busy ? "Saving…" : "Save profile"}
           </button>
         </div>
-        {saved && <p className={styles.savedNote}>Saved.</p>}
       </form>
     </div>
   );
